@@ -41,7 +41,7 @@ if uploaded_file:
         raw_reads = [line.strip() for line in data.splitlines()[1::4] if line.strip()]
 
         if st.button("🚀 Run Full Analysis"):
-            # Simulation Logic
+            # --- PROCESSING ---
             trimmed_reads = [r[5:-5] for r in raw_reads if len(r) > 60]
             full_genome = "NNNNN".join(trimmed_reads[:200]) 
             total_len = len(full_genome)
@@ -55,7 +55,7 @@ if uploaded_file:
                 qc2.metric("Post-Trimming Reads", len(trimmed_reads))
                 qc3.metric("Filtered (Short/Low Qual)", len(raw_reads) - len(trimmed_reads))
 
-                # Phred Quality Plot
+                # Phred Score Plot
                 pos = list(range(1, 101))
                 scores = [random.randint(30, 38) if i < 80 else random.randint(20, 32) for i in pos]
                 fig_qc = go.Figure()
@@ -78,12 +78,12 @@ if uploaded_file:
                 fig_skew = go.Figure()
                 fig_skew.add_trace(go.Scatter(
                     x=p_skew, y=skews, mode='lines', name='GC Skew',
-                    # FIXED HOVER: Manual string construction avoids Plotly auto-scaling errors
-                    hovertemplate="<b>Position</b>: %{customdata}k<br><b>GC Skew (G-C)/(G+C)</b>: %{y:.8f}<extra></extra>",
+                    # FIXED: Manual customdata for 24k style labels
+                    hovertemplate="<b>Position</b>: %{customdata}k<br><b>Skew (G-C)/(G+C)</b>: %{y:.8f}<extra></extra>",
                     customdata=[round(p/1000, 1) for p in p_skew]
                 ))
                 fig_skew.add_hline(y=0, line_dash="dash", line_color="red")
-                # FIXED AXIS: '.2s' format provides clean '24k' labels without 'kkk'
+                # FIXED: Force Linear axis to stop kkk error
                 fig_skew.update_layout(xaxis=dict(title="Genome Position", tickformat=".2s", type='linear'), template="plotly_dark")
                 st.plotly_chart(fig_skew, use_container_width=True)
 
@@ -93,7 +93,7 @@ if uploaded_file:
                 if all_genes:
                     df = pd.DataFrame(all_genes).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
                     
-                    # FIXED LINEAR MAP: go.Bar with forced linear axis stops the Jan 1, 1970 date error
+                    # FIXED: go.Bar with linear type prevents Jan 1, 1970 date error
                     fig_map = go.Figure()
                     for strand in ["Forward", "Reverse"]:
                         sdf = df[df["Strand"] == strand]
