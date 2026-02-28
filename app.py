@@ -59,13 +59,14 @@ if uploaded_file:
                 
                 fig_q = go.Figure()
                 # Before Trimming Trace
-                fig_q.add_trace(go.Scatter(x=pos, y=scores_before, mode='lines', line=dict(color='#E74C3C', width=2, dash='dot'), name='Raw (Before Trimming)'))
+                fig_q.add_trace(go.Scatter(x=pos, y=scores_before, mode='lines', line=dict(color='#E74C3C', width=2, dash='dot'), name='Raw (Before)'))
                 # After Trimming Trace
-                fig_q.add_trace(go.Scatter(x=pos, y=scores_after, mode='lines', line=dict(color='#2ECC71', width=3), name='Cleaned (After Trimming)'))
+                fig_q.add_trace(go.Scatter(x=pos, y=scores_after, mode='lines', line=dict(color='#2ECC71', width=3), name='Cleaned (After)'))
                 
-                fig_q.add_hrect(y0=28, y1=40, fillcolor="green", opacity=0.1, line_width=0, annotation_text="Pass")
+                fig_q.add_hrect(y0=28, y1=45, fillcolor="green", opacity=0.1, line_width=0, annotation_text="Pass")
                 fig_q.add_hrect(y0=0, y1=20, fillcolor="red", opacity=0.1, line_width=0, annotation_text="Fail")
                 
+                # FIXED: Range now has explicit values
                 fig_q.update_layout(
                     xaxis=dict(title="Position in Read (bp)", type='linear', range=),
                     yaxis=dict(title="Quality Score (Phred Q)", range=),
@@ -80,6 +81,7 @@ if uploaded_file:
 
             with tab2:
                 st.subheader("📈 Assembly & GC Skew Analysis")
+                
                 window = 500
                 skews, p_skew = [], []
                 for i in range(0, total_len - window, window):
@@ -95,15 +97,18 @@ if uploaded_file:
                     customdata=[round(p/1000, 1) for p in p_skew]
                 ))
                 fig_skew.add_hline(y=0, line_dash="dash", line_color="red")
+                # FIXED: .2s format prevents "kkk" error
                 fig_skew.update_layout(xaxis=dict(title="Genome Position", tickformat=".2s", type='linear'), template="plotly_dark")
                 st.plotly_chart(fig_skew, use_container_width=True)
 
             with tab3:
                 st.subheader("🗺️ Structural Annotation")
+                
                 all_genes = find_all_orfs(full_genome)
                 if all_genes:
                     df = pd.DataFrame(all_genes).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
                     
+                    # FIXED: forced type='linear' stops Jan 1, 1970 error
                     fig_map = go.Figure()
                     for strand in ["Forward", "Reverse"]:
                         sdf = df[df["Strand"] == strand]
