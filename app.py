@@ -54,7 +54,7 @@ if uploaded_file:
             m2.metric("Assembly GC %", f"{round((full_genome.count('G')+full_genome.count('C'))/total_len*100, 2)}%")
             m3.metric("Reads Assembled", len(reads[:200]))
 
-            # --- 2. SCIENTIFIC GC SKEW GRAPH (Fixed Scaling) ---
+            # --- 2. SCIENTIFIC GC SKEW GRAPH (Fixed 24k Label) ---
             st.subheader("📈 GC Skew Analysis (Origin of Replication)")
             window = 500
             skews, positions = [], []
@@ -67,39 +67,40 @@ if uploaded_file:
             
             fig_skew = go.Figure()
             fig_skew.add_trace(go.Scatter(
-                x=positions, 
-                y=skews, 
-                mode='lines', 
-                name='GC Skew (G-C)/(G+C)', 
+                x=positions, y=skews, mode='lines', name='GC Skew (G-C)/(G+C)',
                 line=dict(color='#1f77b4'),
-                # CUSTOM HOVER: Dividing by 1000 and adding 'k' manually to avoid 'kkk'
-                hovertemplate="<b>Genome Position</b>: %{customdata}k<br>" +
-                              "<b>GC Skew (G-C)/(G+C)</b>: %{y:.8f}<extra></extra>",
+                hovertemplate="<b>Position</b>: %{customdata}k<br><b>GC Skew</b>: %{y:.8f}<extra></extra>",
                 customdata=[p/1000 for p in positions]
             ))
             fig_skew.add_hline(y=0, line_dash="dash", line_color="red")
-            
-            fig_skew.update_layout(
-                xaxis=dict(
-                    title="Genome Position", 
-                    type='linear',
-                    # This ensures the AXIS labels also show '23k' correctly
-                    tickformat=".2s" 
-                ),
-                yaxis=dict(title="GC Skew (G-C)/(G+C)"),
-                template="plotly_dark",
-                hovermode="x"
-            )
+            fig_skew.update_layout(xaxis=dict(title="Genome Position", type='linear', tickformat=".2s"),
+                                 yaxis=dict(title="GC Skew (G-C)/(G+C)"), template="plotly_dark")
             st.plotly_chart(fig_skew, use_container_width=True)
 
-            # --- 3. ANNOTATION TABLE ---
-            st.subheader("🧬 Predicted Coding Sequences (CDS)")
+            # --- 3. LINEAR GENOME MAP (Fixed No-Date Format) ---
+            st.subheader("🗺️ Linear Genome Map (Gene Locations)")
+            
             all_genes = find_all_orfs(full_genome)
             if all_genes:
                 df = pd.DataFrame(all_genes).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
+                
+                fig_map = go.Figure()
+                for strand in ["Forward", "Reverse"]:
+                    sdf = df[df["Strand"] == strand]
+                    fig_map.add_trace(go.Bar(
+                        x=sdf["Length"], y=sdf["Strand"], base=sdf["Start"],
+                        orientation='h', name=strand,
+                        marker=dict(color=sdf["GC %"], colorscale='Viridis', showscale=(strand == "Forward")),
+                        hovertemplate="<b>Start</b>: %{base} bp<br><b>Length</b>: %{x} bp<br><b>GC %</b>: %{marker.color}<extra></extra>"
+                    ))
+                fig_map.update_layout(xaxis=dict(title="Genome Coordinate (bp)", type='linear'),
+                                     yaxis=dict(title="Strand"), template="plotly_dark", height=300)
+                st.plotly_chart(fig_map, use_container_width=True)
+
+                # --- 4. ANNOTATION TABLE ---
+                st.subheader("🧬 Predicted Coding Sequences (CDS)")
                 st.dataframe(df, use_container_width=True)
                 
-                # GFF3 Download
                 gff = "##gff-version 3\n"
                 for i, row in df.iterrows():
                     s = "+" if row['Strand'] == "Forward" else "-"
