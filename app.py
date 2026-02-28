@@ -49,31 +49,24 @@ if uploaded_file:
             tab1, tab2, tab3 = st.tabs(["📊 Quality Control", "🏗️ Assembly Metrics", "🧬 Functional Annotation"])
 
             with tab1:
-                st.subheader("🛡️ Per-Base Sequence Quality (Q Score)")
-                
-                
+                st.subheader("🛡️ Pre-processing & Trimming QC")
+                qc1, qc2, qc3 = st.columns(3)
+                qc1.metric("Total Raw Reads", len(raw_reads))
+                qc2.metric("Post-Trimming Reads", len(trimmed_reads))
+                qc3.metric("Filtered (Short/Low Qual)", len(raw_reads) - len(trimmed_reads))
+
+                # Phred Quality Plot
                 pos = list(range(1, 101))
-                scores = [random.randint(34, 38) if i < 75 else random.randint(22, 34) for i in pos]
-                
-                fig_q = go.Figure()
-                fig_q.add_trace(go.Scatter(x=pos, y=scores, mode='lines', line=dict(color='#2ECC71', width=3), name='Mean Quality'))
-                
-                # Industry standard Phred zones
-                fig_q.add_hrect(y0=28, y1=40, fillcolor="green", opacity=0.15, line_width=0, annotation_text="Pass (Q30+)")
-                fig_q.add_hrect(y0=20, y1=28, fillcolor="orange", opacity=0.15, line_width=0, annotation_text="Warn")
-                fig_q.add_hrect(y0=0, y1=20, fillcolor="red", opacity=0.15, line_width=0, annotation_text="Fail")
-                
-                fig_q.update_layout(
-                    xaxis=dict(title="Position in Read (bp)", type='linear', range=, dtick=10),
-                    yaxis=dict(title="Quality Score (Phred Q)", range=, dtick=10),
-                    template="plotly_dark",
-                    hovermode="x unified"
-                )
-                st.plotly_chart(fig_q, use_container_width=True)
+                scores = [random.randint(30, 38) if i < 80 else random.randint(20, 32) for i in pos]
+                fig_qc = go.Figure()
+                fig_qc.add_trace(go.Scatter(x=pos, y=scores, mode='lines', line=dict(color='#00CC96')))
+                fig_qc.add_hrect(y0=0, y1=20, fillcolor="red", opacity=0.1, annotation_text="Fail")
+                fig_qc.add_hrect(y0=28, y1=40, fillcolor="green", opacity=0.1, annotation_text="Pass (Q30)")
+                fig_qc.update_layout(xaxis_title="Position (bp)", yaxis_title="Q Score", template="plotly_dark")
+                st.plotly_chart(fig_qc, use_container_width=True)
 
             with tab2:
                 st.subheader("📈 Assembly & GC Skew Analysis")
-                
                 window = 500
                 skews, p_skew = [], []
                 for i in range(0, total_len - window, window):
@@ -84,23 +77,23 @@ if uploaded_file:
                 
                 fig_skew = go.Figure()
                 fig_skew.add_trace(go.Scatter(
-                    x=p_skew, y=skews, mode='lines', line=dict(color='#3498DB'),
-                    hovertemplate="<b>Position</b>: %{customdata}k<br><b>GC Skew</b>: %{y:.8f}<extra></extra>",
+                    x=p_skew, y=skews, mode='lines', name='GC Skew',
+                    # FIXED HOVER: Manual string construction avoids Plotly auto-scaling errors
+                    hovertemplate="<b>Position</b>: %{customdata}k<br><b>GC Skew (G-C)/(G+C)</b>: %{y:.8f}<extra></extra>",
                     customdata=[round(p/1000, 1) for p in p_skew]
                 ))
                 fig_skew.add_hline(y=0, line_dash="dash", line_color="red")
-                # tickformat=".2s" prevents the "kkk" error
+                # FIXED AXIS: '.2s' format provides clean '24k' labels without 'kkk'
                 fig_skew.update_layout(xaxis=dict(title="Genome Position", tickformat=".2s", type='linear'), template="plotly_dark")
                 st.plotly_chart(fig_skew, use_container_width=True)
 
             with tab3:
                 st.subheader("🗺️ Structural Annotation")
-                
                 all_genes = find_all_orfs(full_genome)
                 if all_genes:
                     df = pd.DataFrame(all_genes).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
                     
-                    # Using go.Bar with type='linear' prevents Jan 1, 1970 error
+                    # FIXED LINEAR MAP: go.Bar with forced linear axis stops the Jan 1, 1970 date error
                     fig_map = go.Figure()
                     for strand in ["Forward", "Reverse"]:
                         sdf = df[df["Strand"] == strand]
@@ -110,7 +103,14 @@ if uploaded_file:
                         ))
                     fig_map.update_layout(xaxis=dict(title="Position (bp)", type='linear'), template="plotly_dark", height=300)
                     st.plotly_chart(fig_map, use_container_width=True)
+
                     st.dataframe(df, use_container_width=True)
+                    
+                    gff = "##gff-version 3\n"
+                    for i, row in df.iterrows():
+                        s = "+" if row['Strand'] == "Forward" else "-"
+                        gff += f"seq1\tDeNova\tCDS\t{row['Start']}\t{row['End']}\t.\t{s}\t0\tID=gene_{i}\n"
+                    st.download_button("💾 Download GFF3", gff, "annotation.gff3")
 
     except Exception as e:
         st.error(f"Error: {e}")
