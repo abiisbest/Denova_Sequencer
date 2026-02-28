@@ -41,6 +41,7 @@ if uploaded_file:
         raw_reads = [line.strip() for line in data.splitlines()[1::4] if line.strip()]
 
         if st.button("🚀 Run Full Analysis"):
+            # Simulation Logic
             trimmed_reads = [r[5:-5] for r in raw_reads if len(r) > 60]
             full_genome = "NNNNN".join(trimmed_reads[:200]) 
             total_len = len(full_genome)
@@ -56,17 +57,16 @@ if uploaded_file:
 
                 # Phred Quality Plot
                 pos = list(range(1, 101))
-                scores = [random.randint(32, 38) if i < 75 else random.randint(22, 32) for i in pos]
+                scores = [random.randint(30, 38) if i < 80 else random.randint(20, 32) for i in pos]
                 fig_qc = go.Figure()
                 fig_qc.add_trace(go.Scatter(x=pos, y=scores, mode='lines', line=dict(color='#00CC96')))
                 fig_qc.add_hrect(y0=0, y1=20, fillcolor="red", opacity=0.1, annotation_text="Fail")
                 fig_qc.add_hrect(y0=28, y1=40, fillcolor="green", opacity=0.1, annotation_text="Pass (Q30)")
-                fig_qc.update_layout(title="Per-Base Sequence Quality", xaxis_title="Position (bp)", yaxis_title="Q Score", template="plotly_dark")
+                fig_qc.update_layout(xaxis_title="Position (bp)", yaxis_title="Q Score", template="plotly_dark")
                 st.plotly_chart(fig_qc, use_container_width=True)
 
             with tab2:
                 st.subheader("📈 Assembly & GC Skew Analysis")
-                # GC Skew Logic
                 window = 500
                 skews, p_skew = [], []
                 for i in range(0, total_len - window, window):
@@ -78,12 +78,13 @@ if uploaded_file:
                 fig_skew = go.Figure()
                 fig_skew.add_trace(go.Scatter(
                     x=p_skew, y=skews, mode='lines', name='GC Skew',
-                    hovertemplate="<b>Position</b>: %{customdata}k<br><b>Skew</b>: %{y:.8f}<extra></extra>",
+                    # FIXED HOVER: Manual string construction avoids Plotly auto-scaling errors
+                    hovertemplate="<b>Position</b>: %{customdata}k<br><b>GC Skew (G-C)/(G+C)</b>: %{y:.8f}<extra></extra>",
                     customdata=[round(p/1000, 1) for p in p_skew]
                 ))
                 fig_skew.add_hline(y=0, line_dash="dash", line_color="red")
-                # Fix for the 'kkk' error: use tickformat 's' which is standard SI
-                fig_skew.update_layout(title="GC Skew Plot", xaxis=dict(title="Genome Position", tickformat=".2s"), template="plotly_dark")
+                # FIXED AXIS: '.2s' format provides clean '24k' labels without 'kkk'
+                fig_skew.update_layout(xaxis=dict(title="Genome Position", tickformat=".2s", type='linear'), template="plotly_dark")
                 st.plotly_chart(fig_skew, use_container_width=True)
 
             with tab3:
@@ -92,7 +93,7 @@ if uploaded_file:
                 if all_genes:
                     df = pd.DataFrame(all_genes).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
                     
-                    # Fix for the Date Error: Use a standard Bar chart with 'base' offset
+                    # FIXED LINEAR MAP: go.Bar with forced linear axis stops the Jan 1, 1970 date error
                     fig_map = go.Figure()
                     for strand in ["Forward", "Reverse"]:
                         sdf = df[df["Strand"] == strand]
@@ -100,8 +101,7 @@ if uploaded_file:
                             x=sdf["Length"], y=sdf["Strand"], base=sdf["Start"], 
                             orientation='h', name=strand, marker=dict(color=sdf["GC %"], colorscale='Viridis')
                         ))
-                    # Force X-axis to linear numbers to stop Jan 1, 1970 error
-                    fig_map.update_layout(title="Linear Gene Map", xaxis=dict(title="Position (bp)", type='linear'), template="plotly_dark", height=300)
+                    fig_map.update_layout(xaxis=dict(title="Position (bp)", type='linear'), template="plotly_dark", height=300)
                     st.plotly_chart(fig_map, use_container_width=True)
 
                     st.dataframe(df, use_container_width=True)
