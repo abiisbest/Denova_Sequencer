@@ -94,7 +94,7 @@ if uploaded_file:
                     customdata=[round(p/1000, 1) for p in p_skew]
                 ))
                 fig_skew.add_hline(y=0, line_dash="dash", line_color="red")
-                # FIXED: .2s prevents "kkk" error
+                # FIXED: .2s format prevents "kkk" error
                 fig_skew.update_layout(xaxis=dict(title="Genome Position", tickformat=".2s", type='linear'), template="plotly_dark")
                 st.plotly_chart(fig_skew, use_container_width=True)
 
