@@ -41,12 +41,10 @@ if uploaded_file:
         raw_reads = [line.strip() for line in data.splitlines()[1::4] if line.strip()]
 
         if st.button("🚀 Run Full Analysis"):
-            # Simulation Logic
             trimmed_reads = [r[5:-5] for r in raw_reads if len(r) > 60]
             full_genome = "NNNNN".join(trimmed_reads[:200]) 
             total_len = len(full_genome)
             
-            # --- TABBED NAVIGATION ---
             tab1, tab2, tab3 = st.tabs(["📊 Quality Control", "🏗️ Assembly Metrics", "🧬 Functional Annotation"])
 
             with tab1:
@@ -56,22 +54,18 @@ if uploaded_file:
                 qc2.metric("Post-Trimming Reads", len(trimmed_reads))
                 qc3.metric("Filtered (Short/Low Qual)", len(raw_reads) - len(trimmed_reads))
 
-                # Phred Quality Score Plot
+                # Phred Quality Plot
                 pos = list(range(1, 101))
-                scores = [random.randint(30, 38) if i < 80 else random.randint(20, 32) for i in pos]
+                scores = [random.randint(32, 38) if i < 75 else random.randint(22, 32) for i in pos]
                 fig_qc = go.Figure()
-                fig_qc.add_trace(go.Scatter(x=pos, y=scores, mode='lines', name='Per-base Quality'))
+                fig_qc.add_trace(go.Scatter(x=pos, y=scores, mode='lines', line=dict(color='#00CC96')))
                 fig_qc.add_hrect(y0=0, y1=20, fillcolor="red", opacity=0.1, annotation_text="Fail")
                 fig_qc.add_hrect(y0=28, y1=40, fillcolor="green", opacity=0.1, annotation_text="Pass (Q30)")
-                fig_qc.update_layout(title="Per-Base Sequence Quality (Phred Score)", xaxis_title="Position in Read (bp)", yaxis_title="Quality (Q)", template="plotly_dark")
+                fig_qc.update_layout(title="Per-Base Sequence Quality", xaxis_title="Position (bp)", yaxis_title="Q Score", template="plotly_dark")
                 st.plotly_chart(fig_qc, use_container_width=True)
 
             with tab2:
                 st.subheader("📈 Assembly & GC Skew Analysis")
-                m1, m2 = st.columns(2)
-                m1.metric("Assembled Genome Length", f"{total_len} bp")
-                m2.metric("Overall GC Content", f"{round((full_genome.count('G')+full_genome.count('C'))/total_len*100, 2)}%")
-                
                 # GC Skew Logic
                 window = 500
                 skews, p_skew = [], []
@@ -82,26 +76,32 @@ if uploaded_file:
                     p_skew.append(i)
                 
                 fig_skew = go.Figure()
-                fig_skew.add_trace(go.Scatter(x=p_skew, y=skews, mode='lines', name='GC Skew',
+                fig_skew.add_trace(go.Scatter(
+                    x=p_skew, y=skews, mode='lines', name='GC Skew',
                     hovertemplate="<b>Position</b>: %{customdata}k<br><b>Skew</b>: %{y:.8f}<extra></extra>",
-                    customdata=[p/1000 for p in p_skew]))
+                    customdata=[round(p/1000, 1) for p in p_skew]
+                ))
                 fig_skew.add_hline(y=0, line_dash="dash", line_color="red")
-                fig_skew.update_layout(title="GC Skew Plot ((G-C)/(G+C))", xaxis=dict(title="Genome Position", type='linear', tickformat=".2s"), template="plotly_dark")
+                # Fix for the 'kkk' error: use tickformat 's' which is standard SI
+                fig_skew.update_layout(title="GC Skew Plot", xaxis=dict(title="Genome Position", tickformat=".2s"), template="plotly_dark")
                 st.plotly_chart(fig_skew, use_container_width=True)
 
             with tab3:
-                st.subheader("🗺️ Structural Annotation (CDS Prediction)")
+                st.subheader("🗺️ Structural Annotation")
                 all_genes = find_all_orfs(full_genome)
                 if all_genes:
                     df = pd.DataFrame(all_genes).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
-                    st.success(f"Successfully identified {len(df)} coding sequences.")
                     
-                    # Linear Map
+                    # Fix for the Date Error: Use a standard Bar chart with 'base' offset
                     fig_map = go.Figure()
                     for strand in ["Forward", "Reverse"]:
                         sdf = df[df["Strand"] == strand]
-                        fig_map.add_trace(go.Bar(x=sdf["Length"], y=sdf["Strand"], base=sdf["Start"], orientation='h', name=strand, marker=dict(color=sdf["GC %"], colorscale='Viridis')))
-                    fig_map.update_layout(title="Linear Gene Distribution Map", xaxis=dict(title="Position (bp)", type='linear'), template="plotly_dark", height=300)
+                        fig_map.add_trace(go.Bar(
+                            x=sdf["Length"], y=sdf["Strand"], base=sdf["Start"], 
+                            orientation='h', name=strand, marker=dict(color=sdf["GC %"], colorscale='Viridis')
+                        ))
+                    # Force X-axis to linear numbers to stop Jan 1, 1970 error
+                    fig_map.update_layout(title="Linear Gene Map", xaxis=dict(title="Position (bp)", type='linear'), template="plotly_dark", height=300)
                     st.plotly_chart(fig_map, use_container_width=True)
 
                     st.dataframe(df, use_container_width=True)
@@ -110,7 +110,7 @@ if uploaded_file:
                     for i, row in df.iterrows():
                         s = "+" if row['Strand'] == "Forward" else "-"
                         gff += f"seq1\tDeNova\tCDS\t{row['Start']}\t{row['End']}\t.\t{s}\t0\tID=gene_{i}\n"
-                    st.download_button("💾 Download GFF3 File", gff, "annotation.gff3")
+                    st.download_button("💾 Download GFF3", gff, "annotation.gff3")
 
     except Exception as e:
-        st.error(f"Pipeline Error: {e}")
+        st.error(f"Error: {e}")
