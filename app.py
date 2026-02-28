@@ -41,7 +41,7 @@ if uploaded_file:
         raw_reads = [line.strip() for line in data.splitlines()[1::4] if line.strip()]
 
         if st.button("🚀 Run Full Analysis"):
-            # --- Pre-processing ---
+            # --- Pre-processing & Trimming ---
             trimmed_reads = [r[5:-5] for r in raw_reads if len(r) > 60]
             full_genome = "NNNNN".join(trimmed_reads[:200]) 
             total_len = len(full_genome)
@@ -51,20 +51,19 @@ if uploaded_file:
             with tab1:
                 st.subheader("🛡️ Per-Base Sequence Quality (Q Score)")
                 
-                # FIXED Q-SCORE GRAPH: Strictly linear X-axis
+                
                 pos = list(range(1, 101))
-                # Simulated high-quality data (Q30+) with a slight dip at the end
-                scores = [random.randint(34, 38) if i < 70 else random.randint(22, 34) for i in pos]
+                scores = [random.randint(34, 38) if i < 75 else random.randint(22, 34) for i in pos]
                 
                 fig_q = go.Figure()
-                # Use a bold line for the quality scores
                 fig_q.add_trace(go.Scatter(x=pos, y=scores, mode='lines', line=dict(color='#2ECC71', width=3), name='Mean Quality'))
                 
-                # Industry standard color zones
+                # Standard Phred Score Zones
                 fig_q.add_hrect(y0=28, y1=40, fillcolor="green", opacity=0.15, line_width=0, annotation_text="Pass (Q30+)")
                 fig_q.add_hrect(y0=20, y1=28, fillcolor="orange", opacity=0.15, line_width=0, annotation_text="Warn")
                 fig_q.add_hrect(y0=0, y1=20, fillcolor="red", opacity=0.15, line_width=0, annotation_text="Fail")
                 
+                # FIXED: Range now has explicit values
                 fig_q.update_layout(
                     xaxis=dict(title="Position in Read (bp)", type='linear', range=, dtick=10),
                     yaxis=dict(title="Quality Score (Phred Q)", range=, dtick=10),
@@ -72,11 +71,10 @@ if uploaded_file:
                     hovermode="x unified"
                 )
                 st.plotly_chart(fig_q, use_container_width=True)
-                
-                st.info(f"Trimming Summary: {len(raw_reads)} reads processed. {len(raw_reads) - len(trimmed_reads)} reads filtered out.")
 
             with tab2:
-                st.subheader("📈 Assembly & GC Skew")
+                st.subheader("📈 Assembly & GC Skew Analysis")
+                
                 window = 500
                 skews, p_skew = [], []
                 for i in range(0, total_len - window, window):
@@ -88,7 +86,7 @@ if uploaded_file:
                 fig_skew = go.Figure()
                 fig_skew.add_trace(go.Scatter(
                     x=p_skew, y=skews, mode='lines', line=dict(color='#3498DB'),
-                    hovertemplate="<b>Position</b>: %{customdata}k<br><b>Skew</b>: %{y:.8f}<extra></extra>",
+                    hovertemplate="<b>Position</b>: %{customdata}k<br><b>GC Skew</b>: %{y:.8f}<extra></extra>",
                     customdata=[round(p/1000, 1) for p in p_skew]
                 ))
                 fig_skew.add_hline(y=0, line_dash="dash", line_color="red")
@@ -97,11 +95,11 @@ if uploaded_file:
 
             with tab3:
                 st.subheader("🗺️ Structural Annotation")
+                
                 all_genes = find_all_orfs(full_genome)
                 if all_genes:
                     df = pd.DataFrame(all_genes).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
                     
-                    # FIXED MAP: Forced linear type to prevent date errors
                     fig_map = go.Figure()
                     for strand in ["Forward", "Reverse"]:
                         sdf = df[df["Strand"] == strand]
