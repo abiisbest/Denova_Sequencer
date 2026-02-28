@@ -3,7 +3,6 @@ import gzip
 import re
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
 
 st.set_page_config(page_title="De Nova Professional", layout="wide")
 
@@ -16,7 +15,7 @@ def get_rev_complement(seq):
 
 def find_all_orfs(sequence, min_len=300):
     found_genes = []
-    # Regex: Start (ATG) -> Triplets -> Stop (TAG|TAA|TGA)
+    # Scientific ORF pattern: Start (ATG) -> Triplets -> Stop (TAG|TAA|TGA)
     pattern = re.compile(r'(ATG(?:...){%d,1000}?(?:TAG|TAA|TGA))' % (min_len // 3))
     
     for strand in ["Forward", "Reverse"]:
@@ -46,7 +45,7 @@ if uploaded_file:
         reads = [line.strip() for line in data.splitlines()[1::4] if len(line) > 50]
 
         if st.button("🚀 Execute Full Genomic Pipeline"):
-            # assembly logic
+            # Assembly Simulation
             full_genome = "NNNNN".join(reads[:200]) 
             total_len = len(full_genome)
             
@@ -57,7 +56,7 @@ if uploaded_file:
             m2.metric("Assembly GC %", f"{round((full_genome.count('G')+full_genome.count('C'))/total_len*100, 2)}%")
             m3.metric("Reads Assembled", len(reads[:200]))
 
-            # --- 2. INTERACTIVE GC SKEW GRAPH ---
+            # --- 2. INTERACTIVE GC SKEW GRAPH (Scientific Labels) ---
             st.subheader("📈 GC Skew Analysis (Origin of Replication)")
             window = 500
             skews, positions = [], []
@@ -69,13 +68,22 @@ if uploaded_file:
                 positions.append(i)
             
             fig_skew = go.Figure()
-            fig_skew.add_trace(go.Scatter(x=positions, y=skews, mode='lines', name='GC Skew', line=dict(color='#1f77b4')))
+            # Setting the trace name to the formula for the hover label
+            fig_skew.add_trace(go.Scatter(
+                x=positions, 
+                y=skews, 
+                mode='lines', 
+                name='GC Skew (G-C)/(G+C)', 
+                line=dict(color='#1f77b4')
+            ))
             fig_skew.add_hline(y=0, line_dash="dash", line_color="red")
+            
             fig_skew.update_layout(
                 xaxis_title="Genome Position (bp)",
-                yaxis_title="Skew (G-C)/(G+C)",
+                yaxis_title="GC Skew (G-C)/(G+C)",
                 template="plotly_dark",
-                hovermode="x unified"
+                hovermode="x unified",
+                xaxis=dict(type='linear') # Force linear to avoid date issues
             )
             st.plotly_chart(fig_skew, use_container_width=True)
 
@@ -86,10 +94,7 @@ if uploaded_file:
                 df = pd.DataFrame(all_genes).sort_values('Start')
                 df = df.drop_duplicates(subset=['Start', 'Strand'], keep='first')
                 
-                # Show unique genes count
                 st.success(f"Found {len(df)} unique high-confidence genes.")
-                
-                # Final Data Table
                 st.dataframe(df, use_container_width=True)
                 
                 # GFF3 Download
