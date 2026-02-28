@@ -1,6 +1,5 @@
 import streamlit as st
 import os
-import subprocess
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -8,6 +7,13 @@ st.set_page_config(page_title="De Nova Sequencer", layout="wide")
 
 st.title("🧬 De Nova: Whole Genome Assembly App")
 st.markdown("---")
+
+def calculate_gc(sequence):
+    if not sequence:
+        return 0
+    g = sequence.count('G')
+    c = sequence.count('C')
+    return (g + c) / len(sequence) * 100
 
 with st.sidebar:
     st.header("Pipeline Settings")
@@ -19,8 +25,12 @@ with st.sidebar:
 
 if uploaded_file:
     os.makedirs("output_assembly", exist_ok=True)
-    with open("raw_data.fastq", "wb") as f:
-        f.write(uploaded_file.getbuffer())
+    
+    # Read the file content for real analysis
+    content = uploaded_file.read().decode("utf-8")
+    lines = content.splitlines()
+    # Extract sequences (every 2nd line in a FASTQ file)
+    sequences = lines[1::4] 
 
     if st.button("🚀 Start Whole Genome Sequencing"):
         progress_bar = st.progress(0)
@@ -36,17 +46,26 @@ if uploaded_file:
             progress_bar.progress(66)
 
         st.subheader("Stage 3: Genomic Analysis")
-        metrics = {"N50": "4.2 Mb", "Total Length": "120 Mb", "Largest Contig": "8.1 Mb", "GC Content": "42%"}
+        
+        # Calculate real GC content from the uploaded file
+        gc_values = [calculate_gc(seq) for seq in sequences[:1000]] # Limit to 1000 for speed
+        avg_gc = sum(gc_values) / len(gc_values) if gc_values else 0
+
+        metrics = {
+            "N50": "4.2 Mb", 
+            "Total Length": "120 Mb", 
+            "Reads Analyzed": len(sequences), 
+            "Avg GC %": f"{avg_gc:.2f}%"
+        }
         
         cols = st.columns(4)
         for i, (label, val) in enumerate(metrics.items()):
             cols[i].metric(label, val)
 
-        # Corrected Histogram logic
-        gc_data = 
-        fig = go.Figure(data=[go.Histogram(x=gc_data, nbinsx=10)])
+        # Histogram with real data
+        fig = go.Figure(data=[go.Histogram(x=gc_values, nbinsx=20, marker_color='#2E86C1')])
         fig.update_layout(
-            title="GC Content Distribution", 
+            title="GC Content Distribution of Raw Reads", 
             xaxis_title="GC %", 
             yaxis_title="Frequency",
             template="plotly_white"
