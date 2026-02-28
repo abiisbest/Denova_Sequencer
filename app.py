@@ -2,7 +2,8 @@ import streamlit as st
 import gzip
 import re
 import pandas as pd
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+import plotly.express as px
 
 st.set_page_config(page_title="De Nova Professional", layout="wide")
 
@@ -15,7 +16,9 @@ def get_rev_complement(seq):
 
 def find_all_orfs(sequence, min_len=300):
     found_genes = []
+    # Regex: Start (ATG) -> Triplets -> Stop (TAG|TAA|TGA)
     pattern = re.compile(r'(ATG(?:...){%d,1000}?(?:TAG|TAA|TGA))' % (min_len // 3))
+    
     for strand in ["Forward", "Reverse"]:
         dna = sequence if strand == "Forward" else get_rev_complement(sequence)
         for frame in range(3):
@@ -24,9 +27,9 @@ def find_all_orfs(sequence, min_len=300):
                 start_pos = match.start() + frame
                 found_genes.append({
                     "Strand": strand,
-                    "Start": start_pos,
-                    "End": start_pos + len(gene_seq),
-                    "Length": len(gene_seq),
+                    "Start": int(start_pos),
+                    "End": int(start_pos + len(gene_seq)),
+                    "Length": int(len(gene_seq)),
                     "GC %": round((gene_seq.count('G') + gene_seq.count('C')) / len(gene_seq) * 100, 2)
                 })
     return found_genes
@@ -42,20 +45,20 @@ if uploaded_file:
         
         reads = [line.strip() for line in data.splitlines()[1::4] if len(line) > 50]
 
-        if st.button("🚀 Run Full Genomic Pipeline"):
+        if st.button("🚀 Execute Full Genomic Pipeline"):
+            # assembly logic
             full_genome = "NNNNN".join(reads[:200]) 
             total_len = len(full_genome)
             
             # --- 1. METRICS ---
             st.subheader("📊 Assembly Quality Metrics")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Length", f"{total_len} bp")
-            col2.metric("Avg GC %", f"{round((full_genome.count('G')+full_genome.count('C'))/total_len*100, 2)}%")
-            col3.metric("Contigs Used", len(reads[:200]))
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total Length", f"{total_len} bp")
+            m2.metric("Assembly GC %", f"{round((full_genome.count('G')+full_genome.count('C'))/total_len*100, 2)}%")
+            m3.metric("Reads Assembled", len(reads[:200]))
 
-            # --- 2. THE MAIN GRAPH: GC SKEW ---
+            # --- 2. INTERACTIVE GC SKEW GRAPH ---
             st.subheader("📈 GC Skew Analysis (Origin of Replication)")
-            
             window = 500
             skews, positions = [], []
             for i in range(0, total_len - window, window):
@@ -65,13 +68,16 @@ if uploaded_file:
                 skews.append(skew)
                 positions.append(i)
             
-            fig, ax = plt.subplots(figsize=(10, 4))
-            ax.plot(positions, skews, color='#1f77b4', label='GC Skew')
-            ax.axhline(0, color='red', linestyle='--', alpha=0.5)
-            ax.set_xlabel("Genome Position (bp)")
-            ax.set_ylabel("Skew (G-C)/(G+C)")
-            ax.grid(True, alpha=0.3)
-            st.pyplot(fig)
+            fig_skew = go.Figure()
+            fig_skew.add_trace(go.Scatter(x=positions, y=skews, mode='lines', name='GC Skew', line=dict(color='#1f77b4')))
+            fig_skew.add_hline(y=0, line_dash="dash", line_color="red")
+            fig_skew.update_layout(
+                xaxis_title="Genome Position (bp)",
+                yaxis_title="Skew (G-C)/(G+C)",
+                template="plotly_dark",
+                hovermode="x unified"
+            )
+            st.plotly_chart(fig_skew, use_container_width=True)
 
             # --- 3. ANNOTATION TABLE ---
             st.subheader("🧬 Predicted Coding Sequences (CDS)")
@@ -79,8 +85,14 @@ if uploaded_file:
             if all_genes:
                 df = pd.DataFrame(all_genes).sort_values('Start')
                 df = df.drop_duplicates(subset=['Start', 'Strand'], keep='first')
+                
+                # Show unique genes count
+                st.success(f"Found {len(df)} unique high-confidence genes.")
+                
+                # Final Data Table
                 st.dataframe(df, use_container_width=True)
                 
+                # GFF3 Download
                 gff = "##gff-version 3\n"
                 for i, row in df.iterrows():
                     s = "+" if row['Strand'] == "Forward" else "-"
