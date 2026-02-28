@@ -3,12 +3,10 @@ import gzip
 import re
 import time
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 
 st.set_page_config(page_title="De Nova Professional", layout="wide")
 
-st.title("🧬 De Nova: Professional Genome Assembly & Visualization")
+st.title("🧬 De Nova: High-Accuracy Genome Assembly & Annotation")
 st.markdown("---")
 
 def get_rev_complement(seq):
@@ -17,8 +15,8 @@ def get_rev_complement(seq):
 
 def find_all_orfs(sequence, min_len=300):
     found_genes = []
-    # Regular expression for ATG -> Triplets -> Stop Codon
-    pattern = re.compile(r'(ATG(..[TCGA]){%d,1000}(TAG|TAA|TGA))' % (min_len // 3))
+    # Strict Start (ATG) to Stop (TAG|TAA|TGA) logic
+    pattern = re.compile(r'(ATG(?:...){%d,1000}?(?:TAG|TAA|TGA))' % (min_len // 3))
     
     for strand in ["Forward", "Reverse"]:
         dna = sequence if strand == "Forward" else get_rev_complement(sequence)
@@ -35,85 +33,67 @@ def find_all_orfs(sequence, min_len=300):
                 })
     return found_genes
 
-uploaded_file = st.file_uploader("Upload Genomic Data (FASTQ/GZ)", type=["fastq", "fq", "gz"])
+uploaded_file = st.file_uploader("Upload FASTQ or GZ File", type=["fastq", "fq", "gz"])
 
 if uploaded_file:
     try:
-        # 1. Handle Binary/Compressed Data
+        # Step 1: Data Extraction
         if uploaded_file.name.endswith('.gz'):
             data = gzip.decompress(uploaded_file.read()).decode("utf-8")
         else:
             data = uploaded_file.read().decode("utf-8")
         
-        # 2. Extract Sequences from FASTQ
+        # Extract sequences (2nd line of every 4-line FASTQ block)
         reads = [line.strip() for line in data.splitlines()[1::4] if len(line) > 50]
 
-        if st.button("🚀 Execute Full Analysis"):
-            # Simulate assembly with spacers to separate genes
+        if st.button("🚀 Run Full Genomic Pipeline"):
+            # Step 2: Assembly Simulation (Stitching reads with spacers)
             full_genome = "NNNNN".join(reads[:200]) 
             total_len = len(full_genome)
             
-            # --- METRICS ---
+            # Step 3: N50 Calculation
+            lengths = sorted([len(r) for r in reads[:200]], reverse=True)
+            cum_sum = 0
+            n50 = 0
+            for l in lengths:
+                cum_sum += l
+                if cum_sum >= sum(lengths) / 2:
+                    n50 = l
+                    break
+
+            # --- DISPLAY SECTION 1: METRICS ---
             st.subheader("📊 Assembly Quality Metrics")
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Total Length", f"{total_len} bp")
-            m2.metric("Assembly GC %", f"{round((full_genome.count('G')+full_genome.count('C'))/total_len*100, 2)}%")
-            m3.metric("Contigs Used", len(reads[:200]))
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("N50 Score", f"{n50} bp")
+            col2.metric("Total Length", f"{total_len} bp")
+            col3.metric("Contigs Used", len(reads[:200]))
+            col4.metric("Avg GC %", f"{round((full_genome.count('G')+full_genome.count('C'))/total_len*100, 2)}%")
 
-            # --- GC SKEW PLOT ---
-            st.subheader("📈 GC Skew Analysis (Origin of Replication)")
-            window = 500
-            skews, positions = [], []
-            for i in range(0, total_len - window, window):
-                sub = full_genome[i:i+window]
-                g, c = sub.count('G'), sub.count('C')
-                skew = (g - c) / (g + c) if (g + c) > 0 else 0
-                skews.append(skew)
-                positions.append(i)
-            
-            fig_skew = px.line(x=positions, y=skews, labels={'x':'Genome Position (bp)', 'y':'GC Skew'})
-            fig_skew.add_hline(y=0, line_dash="dash", line_color="red")
-            st.plotly_chart(fig_skew, use_container_width=True)
-
-            # --- FIXED LINEAR GENOME MAP ---
-            st.subheader("🗺️ Linear Genome Map (Gene Locations)")
+            # --- DISPLAY SECTION 2: ANNOTATION TABLE ---
+            st.subheader("🧬 Predicted Coding Sequences (CDS)")
             all_genes = find_all_orfs(full_genome)
+            
             if all_genes:
+                # Convert to DataFrame and remove duplicates
                 df = pd.DataFrame(all_genes).sort_values('Start')
-                df = df.drop_duplicates(subset=['Start'], keep='first')
+                df = df.drop_duplicates(subset=['Start', 'Strand'], keep='first')
                 
-                # Using bar with 'base' to represent linear genomic coordinates
-                fig_map = px.bar(
-                    df, 
-                    x="Length", 
-                    y="Strand", 
-                    base="Start", 
-                    orientation='h',
-                    color="GC %",
-                    hover_data=["Start", "End", "Length", "GC %"],
-                    color_continuous_scale="Viridis"
-                )
+                st.success(f"Pipeline Complete: {len(df)} unique genes identified.")
                 
-                fig_map.update_layout(
-                    xaxis_title="Genome Position (bp)",
-                    yaxis_title="Strand",
-                    coloraxis_colorbar=dict(title="GC %"),
-                    height=350
-                )
-                fig_map.update_xaxes(type='linear')
-                st.plotly_chart(fig_map, use_container_width=True)
+                # Show the full table clearly
+                st.dataframe(df, use_container_width=True, height=500)
 
-                # --- GFF3 EXPORT ---
-                gff_content = "##gff-version 3\n"
+                # --- STEP 4: GFF3 EXPORT ---
+                gff = "##gff-version 3\n"
                 for i, row in df.iterrows():
-                    strand_sign = "+" if row['Strand'] == "Forward" else "-"
-                    gff_content += f"seq1\tDeNova\tCDS\t{row['Start']}\t{row['End']}\t.\t{strand_sign}\t0\tID=gene_{i};GC={row['GC %']}\n"
+                    s = "+" if row['Strand'] == "Forward" else "-"
+                    gff += f"seq1\tDeNova\tCDS\t{row['Start']}\t{row['End']}\t.\t{s}\t0\tID=gene_{i}\n"
                 
-                st.divider()
-                st.download_button("💾 Download GFF3 Annotation", gff_content, "annotation.gff3")
-                st.dataframe(df.drop(columns=["Sequence"], errors='ignore'), use_container_width=True)
+                st.download_button("💾 Download GFF3 Annotation File", gff, "annotation.gff3")
+            else:
+                st.warning("No genes found. Try a different input file or check the sequence quality.")
 
     except Exception as e:
-        st.error(f"Execution Error: {e}")
+        st.error(f"Critical Error: {e}")
 else:
-    st.info("Awaiting genomic data upload (FASTQ format).")
+    st.info("Awaiting genomic data upload to begin sequencing.")
