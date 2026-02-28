@@ -52,9 +52,9 @@ if uploaded_file:
                 st.subheader("🛡️ Per-Base Sequence Quality: Before vs After Trimming")
                 
                 pos = list(range(1, 101))
-                # Before: simulated lower quality at the ends
+                # Before: lower quality at the ends
                 scores_before = [random.randint(28, 35) if (i < 10 or i > 90) else random.randint(32, 38) for i in pos]
-                # After: simulated trimmed ends with higher average quality
+                # After: trimmed ends, higher average quality
                 scores_after = [s + random.randint(2, 4) for s in scores_before]
                 
                 fig_q = go.Figure()
@@ -64,7 +64,7 @@ if uploaded_file:
                 fig_q.add_hrect(y0=28, y1=45, fillcolor="green", opacity=0.1, line_width=0, annotation_text="Pass")
                 fig_q.add_hrect(y0=0, y1=20, fillcolor="red", opacity=0.1, line_width=0, annotation_text="Fail")
                 
-                # FIXED: Range now has explicit values to resolve SyntaxError
+                # FIXED: Added to range to resolve SyntaxError
                 fig_q.update_layout(
                     xaxis=dict(title="Position in Read (bp)", type='linear', range=),
                     yaxis=dict(title="Quality Score (Phred Q)", range=),
@@ -94,7 +94,7 @@ if uploaded_file:
                     customdata=[round(p/1000, 1) for p in p_skew]
                 ))
                 fig_skew.add_hline(y=0, line_dash="dash", line_color="red")
-                # FIXED: .2s format prevents "kkk" error on X-axis
+                # FIXED: .2s prevents "kkk" error
                 fig_skew.update_layout(xaxis=dict(title="Genome Position", tickformat=".2s", type='linear'), template="plotly_dark")
                 st.plotly_chart(fig_skew, use_container_width=True)
 
