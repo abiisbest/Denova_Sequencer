@@ -15,7 +15,6 @@ def get_rev_complement(seq):
 
 def find_all_orfs(sequence, min_len=300):
     found_genes = []
-    # Standard Genetic Code ORF pattern
     pattern = re.compile(r'(ATG(?:...){%d,1000}?(?:TAG|TAA|TGA))' % (min_len // 3))
     
     for strand in ["Forward", "Reverse"]:
@@ -45,7 +44,6 @@ if uploaded_file:
         reads = [line.strip() for line in data.splitlines()[1::4] if len(line) > 50]
 
         if st.button("🚀 Execute Full Genomic Pipeline"):
-            # Assembly Simulation (joining reads with spacers)
             full_genome = "NNNNN".join(reads[:200]) 
             total_len = len(full_genome)
             
@@ -56,7 +54,7 @@ if uploaded_file:
             m2.metric("Assembly GC %", f"{round((full_genome.count('G')+full_genome.count('C'))/total_len*100, 2)}%")
             m3.metric("Reads Assembled", len(reads[:200]))
 
-            # --- 2. SCIENTIFIC GC SKEW GRAPH ---
+            # --- 2. SCIENTIFIC GC SKEW GRAPH (Fixed Scaling) ---
             st.subheader("📈 GC Skew Analysis (Origin of Replication)")
             window = 500
             skews, positions = [], []
@@ -74,51 +72,31 @@ if uploaded_file:
                 mode='lines', 
                 name='GC Skew (G-C)/(G+C)', 
                 line=dict(color='#1f77b4'),
-                hovertemplate="<b>Genome Position</b>: %{x}k<br><b>GC Skew (G-C)/(G+C)</b>: %{y:.8f}<extra></extra>"
+                # CUSTOM HOVER: Dividing by 1000 and adding 'k' manually to avoid 'kkk'
+                hovertemplate="<b>Genome Position</b>: %{customdata}k<br>" +
+                              "<b>GC Skew (G-C)/(G+C)</b>: %{y:.8f}<extra></extra>",
+                customdata=[p/1000 for p in positions]
             ))
             fig_skew.add_hline(y=0, line_dash="dash", line_color="red")
             
             fig_skew.update_layout(
-                xaxis=dict(title="Genome Position", type='linear', ticksuffix='k'),
+                xaxis=dict(
+                    title="Genome Position", 
+                    type='linear',
+                    # This ensures the AXIS labels also show '23k' correctly
+                    tickformat=".2s" 
+                ),
                 yaxis=dict(title="GC Skew (G-C)/(G+C)"),
                 template="plotly_dark",
                 hovermode="x"
             )
             st.plotly_chart(fig_skew, use_container_width=True)
 
-            # --- 3. FIXED LINEAR GENOME MAP ---
-            st.subheader("🗺️ Linear Genome Map (Gene Locations)")
+            # --- 3. ANNOTATION TABLE ---
+            st.subheader("🧬 Predicted Coding Sequences (CDS)")
             all_genes = find_all_orfs(full_genome)
             if all_genes:
                 df = pd.DataFrame(all_genes).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
-                
-                # Using go.Bar with numerical base for accuracy
-                fig_map = go.Figure()
-                for strand in ["Forward", "Reverse"]:
-                    sdf = df[df["Strand"] == strand]
-                    fig_map.add_trace(go.Bar(
-                        x=sdf["Length"],
-                        y=sdf["Strand"],
-                        base=sdf["Start"],
-                        orientation='h',
-                        name=strand,
-                        marker=dict(color=sdf["GC %"], colorscale='Viridis', showscale=(strand == "Forward")),
-                        hovertemplate="<b>Start</b>: %{base}<br><b>End</b>: %{x}<br><b>GC %</b>: %{marker.color}<extra></extra>"
-                    ))
-
-                fig_map.update_layout(
-                    barmode='stack',
-                    xaxis=dict(title="Genome Coordinate (bp)", type='linear'),
-                    yaxis=dict(title="Strand"),
-                    template="plotly_dark",
-                    height=300,
-                    showlegend=False
-                )
-                st.plotly_chart(fig_map, use_container_width=True)
-
-                # --- 4. ANNOTATION TABLE ---
-                st.subheader("🧬 Predicted Coding Sequences (CDS)")
-                st.success(f"Found {len(df)} unique high-confidence genes.")
                 st.dataframe(df, use_container_width=True)
                 
                 # GFF3 Download
@@ -129,6 +107,4 @@ if uploaded_file:
                 st.download_button("💾 Download GFF3 Annotation", gff, "annotation.gff3")
 
     except Exception as e:
-        st.error(f"Critical Error: {e}")
-else:
-    st.info("Awaiting genomic data upload.")
+        st.error(f"Error: {e}")
