@@ -24,11 +24,8 @@ def find_all_orfs(sequence, min_len=300):
                 gene_seq = match.group()
                 start_pos = match.start() + frame
                 found_genes.append({
-                    "Strand": strand, 
-                    "Start": int(start_pos), 
-                    "End": int(start_pos + len(gene_seq)),
-                    "Length": int(len(gene_seq)), 
-                    "GC %": round((gene_seq.count('G') + gene_seq.count('C')) / len(gene_seq) * 100, 2)
+                    "Strand": strand, "Start": int(start_pos), "End": int(start_pos + len(gene_seq)),
+                    "Length": int(len(gene_seq)), "GC %": round((gene_seq.count('G') + gene_seq.count('C')) / len(gene_seq) * 100, 2)
                 })
     return found_genes
 
@@ -44,7 +41,7 @@ if uploaded_file:
         raw_reads = [line.strip() for line in data.splitlines()[1::4] if line.strip()]
 
         if st.button("🚀 Run Full Analysis"):
-            # --- Pre-processing & Trimming ---
+            # Simulation Logic
             trimmed_reads = [r[5:-5] for r in raw_reads if len(r) > 60]
             full_genome = "NNNNN".join(trimmed_reads[:200]) 
             total_len = len(full_genome)
@@ -52,36 +49,31 @@ if uploaded_file:
             tab1, tab2, tab3 = st.tabs(["📊 Quality Control", "🏗️ Assembly Metrics", "🧬 Functional Annotation"])
 
             with tab1:
-                st.subheader("🛡️ Per-Base Sequence Quality: Before vs After Trimming")
+                st.subheader("🛡️ Per-Base Sequence Quality (Q Score)")
+                
                 
                 pos = list(range(1, 101))
-                # Before: simulated lower quality at the ends
-                scores_before = [random.randint(28, 35) if (i < 10 or i > 90) else random.randint(32, 38) for i in pos]
-                # After: simulated trimmed ends with higher average quality
-                scores_after = [s + random.randint(2, 4) for s in scores_before]
+                scores = [random.randint(34, 38) if i < 75 else random.randint(22, 34) for i in pos]
                 
                 fig_q = go.Figure()
-                fig_q.add_trace(go.Scatter(x=pos, y=scores_before, mode='lines', line=dict(color='#E74C3C', width=2, dash='dot'), name='Raw (Before)'))
-                fig_q.add_trace(go.Scatter(x=pos, y=scores_after, mode='lines', line=dict(color='#2ECC71', width=3), name='Cleaned (After)'))
+                fig_q.add_trace(go.Scatter(x=pos, y=scores, mode='lines', line=dict(color='#2ECC71', width=3), name='Mean Quality'))
                 
-                fig_q.add_hrect(y0=28, y1=45, fillcolor="green", opacity=0.1, line_width=0, annotation_text="Pass")
-                fig_q.add_hrect(y0=0, y1=20, fillcolor="red", opacity=0.1, line_width=0, annotation_text="Fail")
+                # Industry standard Phred zones
+                fig_q.add_hrect(y0=28, y1=40, fillcolor="green", opacity=0.15, line_width=0, annotation_text="Pass (Q30+)")
+                fig_q.add_hrect(y0=20, y1=28, fillcolor="orange", opacity=0.15, line_width=0, annotation_text="Warn")
+                fig_q.add_hrect(y0=0, y1=20, fillcolor="red", opacity=0.15, line_width=0, annotation_text="Fail")
                 
-                # FIXED: Range now has explicit values to resolve SyntaxError
                 fig_q.update_layout(
-                    xaxis=dict(title="Position in Read (bp)", type='linear', range=),
-                    yaxis=dict(title="Quality Score (Phred Q)", range=),
+                    xaxis=dict(title="Position in Read (bp)", type='linear', range=, dtick=10),
+                    yaxis=dict(title="Quality Score (Phred Q)", range=, dtick=10),
                     template="plotly_dark",
                     hovermode="x unified"
                 )
                 st.plotly_chart(fig_q, use_container_width=True)
-                
-                col1, col2 = st.columns(2)
-                col1.metric("Raw Read Count", len(raw_reads))
-                col2.metric("Post-Processed Count", len(trimmed_reads))
 
             with tab2:
                 st.subheader("📈 Assembly & GC Skew Analysis")
+                
                 window = 500
                 skews, p_skew = [], []
                 for i in range(0, total_len - window, window):
@@ -93,26 +85,22 @@ if uploaded_file:
                 fig_skew = go.Figure()
                 fig_skew.add_trace(go.Scatter(
                     x=p_skew, y=skews, mode='lines', line=dict(color='#3498DB'),
-                    hovertemplate="<b>Position</b>: %{customdata}k<br><b>Skew</b>: %{y:.8f}<extra></extra>",
+                    hovertemplate="<b>Position</b>: %{customdata}k<br><b>GC Skew</b>: %{y:.8f}<extra></extra>",
                     customdata=[round(p/1000, 1) for p in p_skew]
                 ))
                 fig_skew.add_hline(y=0, line_dash="dash", line_color="red")
-                
-                # tickformat=".2s" prevents "kkk" error on X-axis
-                fig_skew.update_layout(
-                    xaxis=dict(title="Genome Position", tickformat=".2s", type='linear'), 
-                    yaxis=dict(title="GC Skew ((G-C)/(G+C))"),
-                    template="plotly_dark"
-                )
+                # tickformat=".2s" prevents the "kkk" error
+                fig_skew.update_layout(xaxis=dict(title="Genome Position", tickformat=".2s", type='linear'), template="plotly_dark")
                 st.plotly_chart(fig_skew, use_container_width=True)
 
             with tab3:
-                st.subheader("🗺️ Structural Annotation (Gene Locations)")
+                st.subheader("🗺️ Structural Annotation")
+                
                 all_genes = find_all_orfs(full_genome)
                 if all_genes:
                     df = pd.DataFrame(all_genes).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
                     
-                    # FIXED: forced type='linear' stops Jan 1, 1970 date error
+                    # Using go.Bar with type='linear' prevents Jan 1, 1970 error
                     fig_map = go.Figure()
                     for strand in ["Forward", "Reverse"]:
                         sdf = df[df["Strand"] == strand]
@@ -120,12 +108,7 @@ if uploaded_file:
                             x=sdf["Length"], y=sdf["Strand"], base=sdf["Start"], 
                             orientation='h', name=strand, marker=dict(color=sdf["GC %"], colorscale='Viridis')
                         ))
-                    fig_map.update_layout(
-                        xaxis=dict(title="Position (bp)", type='linear'), 
-                        yaxis=dict(title="Strand"),
-                        template="plotly_dark", 
-                        height=350
-                    )
+                    fig_map.update_layout(xaxis=dict(title="Position (bp)", type='linear'), template="plotly_dark", height=300)
                     st.plotly_chart(fig_map, use_container_width=True)
                     st.dataframe(df, use_container_width=True)
 
