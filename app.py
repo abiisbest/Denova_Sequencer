@@ -48,16 +48,23 @@ if uploaded_file:
             tab1, tab2, tab3 = st.tabs(["📊 Sequencing QC", "🏗️ Assembly Metrics", "🧬 Functional Annotation"])
 
             with tab1:
-                st.subheader("🛡️ Sequencing QC: Read Filtering Funnel")
+                st.subheader("🛡️ Sequencing QC: Before vs. After Filtering")
                 
-                fig_qc_funnel = go.Figure(go.Funnel(
-                    y = ["Raw Reads", "Trimmed Reads"],
-                    x = [len(raw_reads), len(trimmed_reads)],
-                    textinfo = "value+percent initial",
-                    marker = {"color": ["#EF553B", "#00CC96"]}
-                ))
-                fig_qc_funnel.update_layout(template="plotly_dark", height=350, showlegend=False)
-                st.plotly_chart(fig_qc_funnel, use_container_width=True)
+                fig_qc_bar = go.Figure(data=[
+                    go.Bar(name='Before', x=['Read Count'], y=[len(raw_reads)], marker_color='#EF553B', text=[len(raw_reads)], textposition='auto'),
+                    go.Bar(name='After', x=['Read Count'], y=[len(trimmed_reads)], marker_color='#00CC96', text=[len(trimmed_reads)], textposition='auto')
+                ])
+                
+                fig_qc_bar.update_layout(
+                    template="plotly_dark", 
+                    height=400, 
+                    showlegend=False, 
+                    yaxis_title="Number of Reads",
+                    barmode='group'
+                )
+                st.plotly_chart(fig_qc_bar, use_container_width=True)
+                
+                st.info(f"Analysis complete: {len(raw_reads) - len(trimmed_reads)} low-quality reads removed.")
 
             with tab2:
                 st.subheader("📈 Assembly & GC Skew Analysis")
@@ -80,7 +87,7 @@ if uploaded_file:
                 st.plotly_chart(fig_skew, use_container_width=True)
 
             with tab3:
-                st.subheader("🗺️ Annotation Comparison: ORF vs. Validated Genes")
+                st.subheader("🧬 Annotation: Potential ORFs vs. Validated Genes")
                 
                 all_raw_orfs = find_all_orfs(full_genome)
                 final_genes_df = pd.DataFrame(all_raw_orfs).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
@@ -88,19 +95,20 @@ if uploaded_file:
                 col1, col2 = st.columns([1, 2])
                 
                 with col1:
-                    st.write("**Data Reduction**")
-                    fig_ann_bar = go.Figure(go.Bar(
-                        x=["Raw ORFs", "Final Genes"],
-                        y=[len(all_raw_orfs), len(final_genes_df)],
-                        marker_color=["#AB63FA", "#19D3F3"],
-                        text=[len(all_raw_orfs), len(final_genes_df)],
-                        textposition='auto'
-                    ))
-                    fig_ann_bar.update_layout(template="plotly_dark", height=400, showlegend=False, yaxis_title="Count")
+                    fig_ann_bar = go.Figure(data=[
+                        go.Bar(name='Before', x=['Features'], y=[len(all_raw_orfs)], marker_color='#AB63FA', text=[len(all_raw_orfs)], textposition='auto'),
+                        go.Bar(name='After', x=['Features'], y=[len(final_genes_df)], marker_color='#19D3F3', text=[len(final_genes_df)], textposition='auto')
+                    ])
+                    fig_ann_bar.update_layout(
+                        template="plotly_dark", 
+                        height=400, 
+                        showlegend=False, 
+                        yaxis_title="Count",
+                        barmode='group'
+                    )
                     st.plotly_chart(fig_ann_bar, use_container_width=True)
                 
                 with col2:
-                    st.write("**Feature Mapping**")
                     fig_map = go.Figure()
                     for strand in ["Forward", "Reverse"]:
                         sdf = final_genes_df[final_genes_df["Strand"] == strand]
@@ -108,7 +116,13 @@ if uploaded_file:
                             x=sdf["Length"], y=sdf["Strand"], base=sdf["Start"], 
                             orientation='h', marker=dict(color=sdf["GC %"], colorscale='Viridis')
                         ))
-                    fig_map.update_layout(xaxis=dict(title="Position (bp)", type='linear'), template="plotly_dark", height=400, showlegend=False)
+                    fig_map.update_layout(
+                        title="Final Genomic Architecture",
+                        xaxis=dict(title="Position (bp)", type='linear'), 
+                        template="plotly_dark", 
+                        height=400, 
+                        showlegend=False
+                    )
                     st.plotly_chart(fig_map, use_container_width=True)
                 
                 st.dataframe(final_genes_df, use_container_width=True)
