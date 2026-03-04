@@ -4,6 +4,7 @@ import re
 import pandas as pd
 import plotly.graph_objects as go
 import random
+import json
 
 st.set_page_config(page_title="De Nova Professional Suite", layout="wide")
 
@@ -30,7 +31,8 @@ def find_all_orfs(sequence, min_len=300):
                 start_pos = match.start() + frame
                 found_genes.append({
                     "Strand": strand, "Start": int(start_pos), "End": int(start_pos + len(gene_seq)),
-                    "Length": int(len(gene_seq)), "GC %": round((gene_seq.count('G') + gene_seq.count('C')) / len(gene_seq) * 100, 2)
+                    "Length": int(len(gene_seq)), "GC %": round((gene_seq.count('G') + gene_seq.count('C')) / len(gene_seq) * 100, 2),
+                    "Sequence": gene_seq
                 })
     return found_genes
 
@@ -54,8 +56,7 @@ if uploaded_file:
 
             with tab1:
                 st.subheader("🛡️ Sequencing Comparison")
-                raw_n = len(raw_reads)
-                trim_n = len(trimmed_reads)
+                raw_n, trim_n = len(raw_reads), len(trimmed_reads)
                 diff_n = raw_n - trim_n
                 perc_yield = (trim_n / raw_n * 100) if raw_n > 0 else 0
                 perc_loss = (diff_n / raw_n * 100) if raw_n > 0 else 0
@@ -64,9 +65,6 @@ if uploaded_file:
                 c1.metric("Raw Reads (Before)", format_indian_num(raw_n), "100%")
                 c2.metric("Trimmed Reads (After)", format_indian_num(trim_n), f"{perc_yield:.2f}%")
                 c3.metric("Filtered Out", format_indian_num(diff_n), f"-{perc_loss:.2f}%", delta_color="inverse")
-                
-                st.write("---")
-                st.info(f"Filtering complete. Final yield: {perc_yield:.2f}% of original data retained.")
 
             with tab2:
                 st.subheader("📈 Assembly & GC Skew Analysis")
@@ -92,14 +90,12 @@ if uploaded_file:
 
             with tab3:
                 st.subheader("🧬 Annotation Comparison")
-                
                 all_raw_orfs = find_all_orfs(full_genome)
                 final_genes_df = pd.DataFrame(all_raw_orfs).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
                 
-                orf_n = len(all_raw_orfs)
-                gene_n = len(final_genes_df)
-                reduction_perc = (1 - gene_n / orf_n) * 100 if orf_n > 0 else 0
-                retention_perc = (gene_n / orf_n) * 100 if orf_n > 0 else 0
+                orf_n, gene_n = len(all_raw_orfs), len(final_genes_df)
+                retention_perc = (gene_n / orf_n * 100) if orf_n > 0 else 0
+                reduction_perc = (100 - retention_perc)
 
                 a1, a2, a3 = st.columns(3)
                 a1.metric("Total ORFs (Before)", format_indian_num(orf_n), "100%")
@@ -107,7 +103,27 @@ if uploaded_file:
                 a3.metric("Reduction Rate", f"{reduction_perc:.2f}%", delta_color="normal")
 
                 st.write("---")
-                st.subheader("Final Genomic Architecture")
+                st.subheader("📂 Multi-Format Export Center")
+                ex1, ex2, ex3, ex4 = st.columns(4)
+                
+                csv_data = final_genes_df.to_csv(index=False)
+                ex1.download_button("📄 Download CSV", csv_data, "genes.csv", "text/csv", use_container_width=True)
+                
+                json_data = final_genes_df.to_json(orient="records")
+                ex2.download_button("💻 Download JSON", json_data, "genes.json", "application/json", use_container_width=True)
+                
+                gff = "##gff-version 3\n"
+                for i, row in final_genes_df.iterrows():
+                    strand = "+" if row['Strand'] == "Forward" else "-"
+                    gff += f"seq1\tDeNova\tCDS\t{row['Start']}\t{row['End']}\t.\t{strand}\t0\tID=gene_{i};GC={row['GC %']}\n"
+                ex3.download_button("🧬 Download GFF3", gff, "annotation.gff3", "text/plain", use_container_width=True)
+                
+                fasta = ""
+                for i, row in final_genes_df.iterrows():
+                    fasta += f">gene_{i} | {row['Strand']} | Start:{row['Start']} | GC:{row['GC %']}%\n{row['Sequence']}\n"
+                ex4.download_button("📝 Download FASTA", fasta, "sequences.fasta", "text/plain", use_container_width=True)
+
+                st.write("---")
                 fig_map = go.Figure()
                 for strand in ["Forward", "Reverse"]:
                     sdf = final_genes_df[final_genes_df["Strand"] == strand]
@@ -115,15 +131,9 @@ if uploaded_file:
                         x=sdf["Length"], y=sdf["Strand"], base=sdf["Start"], 
                         orientation='h', marker=dict(color=sdf["GC %"], colorscale='Viridis')
                     ))
-                fig_map.update_layout(
-                    xaxis=dict(title="Position (bp)", type='linear'), 
-                    template="plotly_dark", 
-                    height=300, 
-                    showlegend=False
-                )
+                fig_map.update_layout(xaxis=dict(title="Position (bp)", type='linear'), template="plotly_dark", height=300, showlegend=False)
                 st.plotly_chart(fig_map, use_container_width=True)
-                
-                st.dataframe(final_genes_df, use_container_width=True)
+                st.dataframe(final_genes_df.drop(columns=['Sequence']), use_container_width=True)
 
     except Exception as e:
         st.error(f"Error: {e}")
