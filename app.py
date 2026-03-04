@@ -103,6 +103,19 @@ if uploaded_file:
                 a3.metric("Reduction Rate", f"{reduction_perc:.2f}%", delta_color="normal")
 
                 st.write("---")
+                fig_map = go.Figure()
+                for strand in ["Forward", "Reverse"]:
+                    sdf = final_genes_df[final_genes_df["Strand"] == strand]
+                    fig_map.add_trace(go.Bar(
+                        x=sdf["Length"], y=sdf["Strand"], base=sdf["Start"], 
+                        orientation='h', marker=dict(color=sdf["GC %"], colorscale='Viridis')
+                    ))
+                fig_map.update_layout(xaxis=dict(title="Position (bp)", type='linear'), template="plotly_dark", height=300, showlegend=False)
+                st.plotly_chart(fig_map, use_container_width=True)
+                
+                st.dataframe(final_genes_df.drop(columns=['Sequence']), use_container_width=True)
+
+                st.write("---")
                 st.subheader("📂 Multi-Format Export Center")
                 ex1, ex2, ex3, ex4 = st.columns(4)
                 
@@ -122,18 +135,6 @@ if uploaded_file:
                 for i, row in final_genes_df.iterrows():
                     fasta += f">gene_{i} | {row['Strand']} | Start:{row['Start']} | GC:{row['GC %']}%\n{row['Sequence']}\n"
                 ex4.download_button("📝 Download FASTA", fasta, "sequences.fasta", "text/plain", use_container_width=True)
-
-                st.write("---")
-                fig_map = go.Figure()
-                for strand in ["Forward", "Reverse"]:
-                    sdf = final_genes_df[final_genes_df["Strand"] == strand]
-                    fig_map.add_trace(go.Bar(
-                        x=sdf["Length"], y=sdf["Strand"], base=sdf["Start"], 
-                        orientation='h', marker=dict(color=sdf["GC %"], colorscale='Viridis')
-                    ))
-                fig_map.update_layout(xaxis=dict(title="Position (bp)", type='linear'), template="plotly_dark", height=300, showlegend=False)
-                st.plotly_chart(fig_map, use_container_width=True)
-                st.dataframe(final_genes_df.drop(columns=['Sequence']), use_container_width=True)
 
     except Exception as e:
         st.error(f"Error: {e}")
