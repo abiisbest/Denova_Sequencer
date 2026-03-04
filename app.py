@@ -45,32 +45,25 @@ if uploaded_file:
             full_genome = "NNNNN".join(trimmed_reads[:200]) 
             total_len = len(full_genome)
             
-            st.subheader("📊 Pipeline Comparison: Before vs. After")
-            m1, m2, m3, m4 = st.columns(4)
-            
-            raw_count = len(raw_reads)
-            trimmed_count = len(trimmed_reads)
-            all_orfs = find_all_orfs(full_genome)
-            final_df = pd.DataFrame(all_orfs).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
-            
-            m1.metric("Reads (Before)", raw_count)
-            m2.metric("Reads (After)", trimmed_count, f"-{raw_count - trimmed_count}")
-            m3.metric("ORFs (Before)", len(all_orfs))
-            m4.metric("Genes (After)", len(final_df), f"{len(final_df) - len(all_orfs)}")
-
-            tab1, tab2, tab3 = st.tabs(["📊 Quality Control", "🏗️ Assembly Metrics", "🧬 Functional Annotation"])
+            tab1, tab2, tab3 = st.tabs(["📊 Sequencing QC", "🏗️ Assembly Metrics", "🧬 Functional Annotation"])
 
             with tab1:
-                st.subheader("🔄 Sequencing: Length Distribution")
-                col1, col2 = st.columns(2)
-                with col1:
-                    raw_lens = [len(r) for r in raw_reads[:500]]
-                    fig_raw = go.Figure(go.Histogram(x=raw_lens, marker_color='#EF553B', name="Raw"))
+                st.subheader("🛡️ Sequencing Comparison: Raw vs. Filtered")
+                qc_col1, qc_col2 = st.columns(2)
+                
+                with qc_col1:
+                    st.markdown("### 🔴 BEFORE (Raw Data)")
+                    st.metric("Total Reads", len(raw_reads))
+                    raw_lens = [len(r) for r in raw_reads[:1000]]
+                    fig_raw = go.Figure(go.Histogram(x=raw_lens, marker_color='#EF553B'))
                     fig_raw.update_layout(title="Raw Read Lengths", template="plotly_dark", height=300, showlegend=False)
                     st.plotly_chart(fig_raw, use_container_width=True)
-                with col2:
-                    trim_lens = [len(r) for r in trimmed_reads[:500]]
-                    fig_trim = go.Figure(go.Histogram(x=trim_lens, marker_color='#00CC96', name="Trimmed"))
+                
+                with qc_col2:
+                    st.markdown("### 🟢 AFTER (Trimmed/Filtered)")
+                    st.metric("Clean Reads", len(trimmed_reads), f"-{len(raw_reads) - len(trimmed_reads)}")
+                    trim_lens = [len(r) for r in trimmed_reads[:1000]]
+                    fig_trim = go.Figure(go.Histogram(x=trim_lens, marker_color='#00CC96'))
                     fig_trim.update_layout(title="Trimmed Read Lengths", template="plotly_dark", height=300, showlegend=False)
                     st.plotly_chart(fig_trim, use_container_width=True)
 
@@ -95,25 +88,41 @@ if uploaded_file:
                 st.plotly_chart(fig_skew, use_container_width=True)
 
             with tab3:
-                st.subheader("🗺️ Structural Annotation: Feature Map")
-                if not final_df.empty:
-                    fig_map = go.Figure()
-                    for strand in ["Forward", "Reverse"]:
-                        sdf = final_df[final_df["Strand"] == strand]
-                        fig_map.add_trace(go.Bar(
-                            x=sdf["Length"], y=sdf["Strand"], base=sdf["Start"], 
-                            orientation='h', marker=dict(color=sdf["GC %"], colorscale='Viridis')
-                        ))
-                    fig_map.update_layout(xaxis=dict(title="Position (bp)", type='linear'), template="plotly_dark", height=300, showlegend=False)
-                    st.plotly_chart(fig_map, use_container_width=True)
+                st.subheader("🗺️ Annotation Comparison: ORF Search vs. Final Genes")
+                
+                all_raw_orfs = find_all_orfs(full_genome)
+                final_genes_df = pd.DataFrame(all_raw_orfs).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
+                
+                ann_col1, ann_col2 = st.columns(2)
+                
+                with ann_col1:
+                    st.markdown("### 🔴 BEFORE (All Potential ORFs)")
+                    st.metric("Total ORFs Identified", len(all_raw_orfs))
+                    raw_df = pd.DataFrame(all_raw_orfs)
+                    fig_raw_ann = go.Figure(go.Box(y=raw_df["Length"], name="ORFs", marker_color='#AB63FA'))
+                    fig_raw_ann.update_layout(title="Length Distribution of All ORFs", template="plotly_dark", height=300, showlegend=False)
+                    st.plotly_chart(fig_raw_ann, use_container_width=True)
+                
+                with ann_col2:
+                    st.markdown("### 🟢 AFTER (Validated Genes)")
+                    st.metric("Final Gene Count", len(final_genes_df), f"-{len(all_raw_orfs) - len(final_genes_df)}")
+                    fig_final_ann = go.Figure(go.Box(y=final_genes_df["Length"], name="Genes", marker_color='#19D3F3'))
+                    fig_final_ann.update_layout(title="Length Distribution of Validated Genes", template="plotly_dark", height=300, showlegend=False)
+                    st.plotly_chart(fig_final_ann, use_container_width=True)
 
-                    st.dataframe(final_df, use_container_width=True)
-                    
-                    gff = "##gff-version 3\n"
-                    for i, row in final_df.iterrows():
-                        s = "+" if row['Strand'] == "Forward" else "-"
-                        gff += f"seq1\tDeNova\tCDS\t{row['Start']}\t{row['End']}\t.\t{s}\t0\tID=gene_{i}\n"
-                    st.download_button("💾 Download GFF3", gff, "annotation.gff3")
+                st.markdown("---")
+                st.subheader("Linear Genome Map (Final Annotation)")
+                fig_map = go.Figure()
+                for strand in ["Forward", "Reverse"]:
+                    sdf = final_genes_df[final_genes_df["Strand"] == strand]
+                    fig_map.add_trace(go.Bar(
+                        x=sdf["Length"], y=sdf["Strand"], base=sdf["Start"], 
+                        orientation='h', marker=dict(color=sdf["GC %"], colorscale='Viridis')
+                    ))
+                fig_map.update_layout(xaxis=dict(title="Position (bp)", type='linear'), template="plotly_dark", height=250, showlegend=False)
+                st.plotly_chart(fig_map, use_container_width=True)
+                
+                st.dataframe(final_genes_df, use_container_width=True)
 
     except Exception as e:
         st.error(f"Error: {e}")
