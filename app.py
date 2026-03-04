@@ -45,53 +45,34 @@ if uploaded_file:
             full_genome = "NNNNN".join(trimmed_reads[:200]) 
             total_len = len(full_genome)
             
-            # Sidebar to show Before/After metrics
-            with st.sidebar:
-                st.header("📊 Global Metrics")
-                st.markdown("---")
-                st.subheader("Sequencing Comparison")
-                raw_count = len(raw_reads)
-                trimmed_count = len(trimmed_reads)
-                reads_removed = raw_count - trimmed_count
-                st.metric(label="Raw Reads (Before)", value=raw_count)
-                st.metric(label="Trimmed Reads (After)", value=trimmed_count)
-                st.metric(label="Reads Removed", value=reads_removed)
-                st.markdown("---")
-                
-                # These will be updated later
-                st.subheader("Annotation Comparison")
-                gene_placeholder_before = st.empty()
-                gene_placeholder_after = st.empty()
+            st.subheader("📊 Pipeline Comparison: Before vs. After")
+            m1, m2, m3, m4 = st.columns(4)
+            
+            raw_count = len(raw_reads)
+            trimmed_count = len(trimmed_reads)
+            all_orfs = find_all_orfs(full_genome)
+            final_df = pd.DataFrame(all_orfs).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
+            
+            m1.metric("Reads (Before)", raw_count)
+            m2.metric("Reads (After)", trimmed_count, f"-{raw_count - trimmed_count}")
+            m3.metric("ORFs (Before)", len(all_orfs))
+            m4.metric("Genes (After)", len(final_df), f"{len(final_df) - len(all_orfs)}")
 
             tab1, tab2, tab3 = st.tabs(["📊 Quality Control", "🏗️ Assembly Metrics", "🧬 Functional Annotation"])
 
             with tab1:
-                st.subheader("🔄 Sequencing: Before vs. After Trimming")
+                st.subheader("🔄 Sequencing: Length Distribution")
                 col1, col2 = st.columns(2)
-                
                 with col1:
-                    st.info("Raw Sequence Profile")
                     raw_lens = [len(r) for r in raw_reads[:500]]
-                    fig_raw = go.Figure(go.Histogram(x=raw_lens, marker_color='#EF553B'))
-                    fig_raw.update_layout(title="Raw Read Length Distribution", template="plotly_dark", height=300)
+                    fig_raw = go.Figure(go.Histogram(x=raw_lens, marker_color='#EF553B', name="Raw"))
+                    fig_raw.update_layout(title="Raw Read Lengths", template="plotly_dark", height=300, showlegend=False)
                     st.plotly_chart(fig_raw, use_container_width=True)
-                
                 with col2:
-                    st.success("Trimmed Sequence Profile")
                     trim_lens = [len(r) for r in trimmed_reads[:500]]
-                    fig_trim = go.Figure(go.Histogram(x=trim_lens, marker_color='#00CC96'))
-                    fig_trim.update_layout(title="Trimmed Read Length Distribution", template="plotly_dark", height=300)
+                    fig_trim = go.Figure(go.Histogram(x=trim_lens, marker_color='#00CC96', name="Trimmed"))
+                    fig_trim.update_layout(title="Trimmed Read Lengths", template="plotly_dark", height=300, showlegend=False)
                     st.plotly_chart(fig_trim, use_container_width=True)
-
-                st.markdown("---")
-                pos = list(range(1, 101))
-                scores = [random.randint(30, 38) if i < 80 else random.randint(20, 32) for i in pos]
-                fig_qc = go.Figure()
-                fig_qc.add_trace(go.Scatter(x=pos, y=scores, mode='lines', line=dict(color='#00CC96')))
-                fig_qc.add_hrect(y0=0, y1=20, fillcolor="red", opacity=0.1, annotation_text="Fail")
-                fig_qc.add_hrect(y0=28, y1=40, fillcolor="green", opacity=0.1, annotation_text="Pass (Q30)")
-                fig_qc.update_layout(title="Post-Analysis Quality (Phred)", xaxis_title="Position (bp)", yaxis_title="Q Score", template="plotly_dark")
-                st.plotly_chart(fig_qc, use_container_width=True)
 
             with tab2:
                 st.subheader("📈 Assembly & GC Skew Analysis")
@@ -105,56 +86,34 @@ if uploaded_file:
                 
                 fig_skew = go.Figure()
                 fig_skew.add_trace(go.Scatter(
-                    x=p_skew, y=skews, mode='lines', name='GC Skew',
-                    hovertemplate="<b>Position</b>: %{customdata}k<br><b>GC Skew</b>: %{y:.4f}<extra></extra>",
-                    customdata=[round(p/1000, 1) for p in p_skew]
+                    x=p_skew, y=skews, mode='lines', 
+                    customdata=[round(p/1000, 1) for p in p_skew],
+                    hovertemplate="Pos: %{customdata}k<br>Skew: %{y:.4f}<extra></extra>"
                 ))
                 fig_skew.add_hline(y=0, line_dash="dash", line_color="red")
-                fig_skew.update_layout(xaxis=dict(title="Genome Position", tickformat=".2s"), template="plotly_dark")
+                fig_skew.update_layout(xaxis=dict(title="Genome Position", tickformat=".2s"), template="plotly_dark", showlegend=False)
                 st.plotly_chart(fig_skew, use_container_width=True)
 
             with tab3:
-                st.subheader("🗺️ Structural Annotation: Feature Comparison")
-                all_genes_before = find_all_orfs(full_genome)
-                
-                # Update annotation metrics in sidebar
-                gene_placeholder_before.metric("Raw ORFs Found (Before)", len(all_genes_before))
+                st.subheader("🗺️ Structural Annotation: Feature Map")
+                if not final_df.empty:
+                    fig_map = go.Figure()
+                    for strand in ["Forward", "Reverse"]:
+                        sdf = final_df[final_df["Strand"] == strand]
+                        fig_map.add_trace(go.Bar(
+                            x=sdf["Length"], y=sdf["Strand"], base=sdf["Start"], 
+                            orientation='h', marker=dict(color=sdf["GC %"], colorscale='Viridis')
+                        ))
+                    fig_map.update_layout(xaxis=dict(title="Position (bp)", type='linear'), template="plotly_dark", height=300, showlegend=False)
+                    st.plotly_chart(fig_map, use_container_width=True)
 
-                if all_genes_before:
-                    df = pd.DataFrame(all_genes_before).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
-                    
-                    # Update 'after' metric
-                    gene_placeholder_after.metric("High-Confidence Genes (After)", len(df))
-                    
-                    ann_col1, ann_col2 = st.columns([1, 2])
-                    
-                    with ann_col1:
-                        st.write("**Annotation Filtering Stats**")
-                        st.write(f"Raw ORFs Found: {cite: len(all_genes_before)}")
-                        st.write(f"Duplicates Removed: {cite: len(all_genes_before) - len(df)}")
-                        st.write(f"Unique Genes Identified: {cite: len(df)}")
-                        st.write(f"Avg Gene Length: {cite: int(df['Length'].mean())} bp")
-                        st.write(f"Avg GC Content: {cite: round(df['GC %'].mean(), 2)}%")
-                    
-                    with ann_col2:
-                        fig_map = go.Figure()
-                        for strand in ["Forward", "Reverse"]:
-                            sdf = df == strand]
-                            fig_map.add_trace(go.Bar(
-                                x=sdf, y=sdf, base=sdf, 
-                                orientation='h', name=strand, marker=dict(color=sdf, colorscale='Viridis')
-                            ))
-                        fig_map.update_layout(title="Linear Gene Map (Before/After Selection)", xaxis=dict(title="Position (bp)", type='linear'), template="plotly_dark", height=300)
-                        st.plotly_chart(fig_map, use_container_width=True)
-
-                    st.markdown("### Feature Table")
-                    st.dataframe(df, use_container_width=True)
+                    st.dataframe(final_df, use_container_width=True)
                     
                     gff = "##gff-version 3\n"
-                    for i, row in df.iterrows():
-                        s = "+" if row == "Forward" else "-"
-                        gff += f"seq1\tDeNova\tCDS\t{cite: row['Start']}\t{cite: row['End']}\t.\t{cite: s}\t0\tID=gene_{cite: i}\n"
+                    for i, row in final_df.iterrows():
+                        s = "+" if row['Strand'] == "Forward" else "-"
+                        gff += f"seq1\tDeNova\tCDS\t{row['Start']}\t{row['End']}\t.\t{s}\t0\tID=gene_{i}\n"
                     st.download_button("💾 Download GFF3", gff, "annotation.gff3")
 
     except Exception as e:
-        st.error(f"Error: {cite: e}")
+        st.error(f"Error: {e}")
