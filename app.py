@@ -4,11 +4,17 @@ import re
 import pandas as pd
 import plotly.graph_objects as go
 import random
+import locale
 
 st.set_page_config(page_title="De Nova Professional Suite", layout="wide")
 
 st.title("🧬 De Nova: End-to-End Genomic Pipeline")
 st.markdown("---")
+
+def format_indian_num(n):
+    if n >= 100000:
+        return f"{n/100000:.2f}L"
+    return f"{n:,}"
 
 def get_rev_complement(seq):
     complement = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', 'N': 'N'}
@@ -50,9 +56,9 @@ if uploaded_file:
             with tab1:
                 st.subheader("🛡️ Sequencing Comparison")
                 c1, c2, c3 = st.columns(3)
-                c1.metric("Raw Reads (Before)", len(raw_reads))
-                c2.metric("Trimmed Reads (After)", len(trimmed_reads))
-                c3.metric("Filtered Out", len(raw_reads) - len(trimmed_reads), delta_color="inverse")
+                c1.metric("Raw Reads (Before)", format_indian_num(len(raw_reads)))
+                c2.metric("Trimmed Reads (After)", format_indian_num(len(trimmed_reads)))
+                c3.metric("Filtered Out", format_indian_num(len(raw_reads) - len(trimmed_reads)), delta_color="inverse")
                 
                 st.write("---")
                 st.info(f"Filtering complete. Final yield: {round((len(trimmed_reads)/len(raw_reads))*100, 2)}% of original data retained.")
@@ -86,8 +92,8 @@ if uploaded_file:
                 final_genes_df = pd.DataFrame(all_raw_orfs).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
                 
                 a1, a2, a3 = st.columns(3)
-                a1.metric("Total ORFs (Before)", len(all_raw_orfs))
-                a2.metric("Validated Genes (After)", len(final_genes_df))
+                a1.metric("Total ORFs (Before)", format_indian_num(len(all_raw_orfs)))
+                a2.metric("Validated Genes (After)", format_indian_num(len(final_genes_df)))
                 a3.metric("Reduction Rate", f"{round((1 - len(final_genes_df)/len(all_raw_orfs))*100, 1)}%")
 
                 st.write("---")
