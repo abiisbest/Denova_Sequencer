@@ -87,10 +87,17 @@ if uploaded_file:
 
                 st.markdown("---")
                 sample_text = "".join(trimmed_reads[:1000])
+                # TRACKING N BASES
                 nuc_counts = {base: sample_text.count(base) for base in "ACGTN"}
                 nuc_df = pd.DataFrame([nuc_counts]).T.reset_index()
                 nuc_df.columns = ["Nucleotide", "Count"]
                 nuc_df["%"] = round((nuc_df["Count"] / sum(nuc_counts.values())) * 100, 2)
+                
+                # Highlight if N count is too high
+                n_perc = nuc_df[nuc_df["Nucleotide"] == "N"]["%"].values[0]
+                if n_perc > 1.0:
+                    st.warning(f"⚠️ High Ambiguity: {n_perc}% of your nucleotides are 'N'. This may affect gene discovery.")
+                
                 st.dataframe(nuc_df, use_container_width=True)
 
             with tab2:
@@ -99,10 +106,7 @@ if uploaded_file:
                 
                 if selected_species != "Custom / Unknown":
                     gc_dev = round(current_gc - ref['ref_gc'], 2)
-                    st.metric("Sample GC %", f"{current_gc}%", f"{gc_dev}% Deviation from {selected_species}")
-                    
-                    if abs(gc_dev) > 5.0:
-                        st.warning("⚠️ High GC Deviation detected. Potential contamination.")
+                    st.metric("Sample GC %", f"{current_gc}%", f"{gc_dev}% Deviation")
                 else:
                     st.metric("Sample GC %", f"{current_gc}%")
 
