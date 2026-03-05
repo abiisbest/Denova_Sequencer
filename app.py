@@ -118,7 +118,6 @@ if uploaded_file:
                 all_raw_orfs = find_all_orfs(full_genome)
                 genes_df = pd.DataFrame(all_raw_orfs).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
                 
-                # Metrics
                 orf_n, gene_n = len(all_raw_orfs), len(genes_df)
                 retention_perc = (gene_n / orf_n * 100) if orf_n > 0 else 0
                 a1, a2, a3 = st.columns(3)
@@ -132,34 +131,25 @@ if uploaded_file:
                 fig_map = go.Figure()
                 for strand in ["Forward", "Reverse"]:
                     sdf = genes_df[genes_df["Strand"] == strand].copy()
-                    
-                    # LOGIC: Identify gaps and fill with Non-Coding blocks
                     last_end = 0
                     plot_data = []
                     for _, row in sdf.iterrows():
                         if row['Start'] > last_end:
-                            # Fill Gap
-                            plot_data.append({"Start": last_end, "Len": row['Start'] - last_end, "Type": "Non-Coding", "GC": 0})
-                        # Add Gene
-                        plot_data.append({"Start": row['Start'], "Len": row['Length'], "Type": "Gene", "GC": row['GC %']})
+                            plot_data.append({"Start": last_end, "Len": row['Start'] - last_end, "Type": "Non-Coding"})
+                        plot_data.append({"Start": row['Start'], "Len": row['Length'], "Type": "Gene"})
                         last_end = row['End']
-                    
-                    # Fill Final Gap
                     if last_end < total_len:
-                        plot_data.append({"Start": last_end, "Len": total_len - last_end, "Type": "Non-Coding", "GC": 0})
+                        plot_data.append({"Start": last_end, "Len": total_len - last_end, "Type": "Non-Coding"})
                     
                     pdf = pd.DataFrame(plot_data)
                     colors = ['#444444' if t == "Non-Coding" else '#00CC96' for t in pdf['Type']]
-                    
                     fig_map.add_trace(go.Bar(
                         x=pdf["Len"], y=[strand]*len(pdf), base=pdf["Start"], 
                         orientation='h', marker=dict(color=colors),
-                        hovertemplate="Type: %{customdata}<extra></extra>",
-                        customdata=pdf["Type"]
+                        customdata=pdf["Type"], hovertemplate="%{customdata}<extra></extra>"
                     ))
 
-                fig_map.update_layout(xaxis=dict(title="Position (bp)", type='linear'), barmode='stack', 
-                                      template="plotly_dark", height=300, showlegend=False)
+                fig_map.update_layout(xaxis=dict(title="Position (bp)"), barmode='stack', template="plotly_dark", height=300, showlegend=False)
                 st.plotly_chart(fig_map, use_container_width=True)
                 
                 st.dataframe(genes_df.drop(columns=['Sequence', 'Type']), use_container_width=True)
@@ -167,10 +157,8 @@ if uploaded_file:
                 st.write("---")
                 st.subheader("📂 Multi-Format Export Center")
                 ex1, ex2, ex3, ex4 = st.columns(4)
-                csv_data = genes_df.to_csv(index=False)
-                ex1.download_button("📄 CSV", csv_data, "genes.csv", "text/csv", use_container_width=True)
-                json_data = genes_df.to_json(orient="records")
-                ex2.download_button("💻 JSON", json_data, "genes.json", "application/json", use_container_width=True)
+                ex1.download_button("📄 CSV", genes_df.to_csv(index=False), "genes.csv", "text/csv", use_container_width=True)
+                ex2.download_button("💻 JSON", genes_df.to_json(orient="records"), "genes.json", "application/json", use_container_width=True)
                 gff = "##gff-version 3\n"
                 for i, row in genes_df.iterrows():
                     s = "+" if row['Strand'] == "Forward" else "-"
