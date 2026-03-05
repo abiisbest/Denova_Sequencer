@@ -126,7 +126,7 @@ if uploaded_file:
                 a3.metric("Reduction Rate", f"{100-retention_perc:.2f}%")
 
                 st.write("---")
-                st.subheader("Continuous Genomic Map (Gaps Removed)")
+                st.subheader("Continuous Genomic Map")
                 
                 fig_map = go.Figure()
                 for strand in ["Forward", "Reverse"]:
