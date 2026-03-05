@@ -48,7 +48,6 @@ if uploaded_file:
         raw_reads = [line.strip() for line in data.splitlines()[1::4] if line.strip()]
 
         if st.button("🚀 Run Full Analysis"):
-            # Processing Logic
             trimmed_reads = [r[5:-5] for r in raw_reads if len(r) > 60]
             full_genome = "NNNNN".join(trimmed_reads[:200]) 
             total_len = len(full_genome)
@@ -57,53 +56,51 @@ if uploaded_file:
 
             with tab1:
                 st.subheader("🛡️ Comprehensive Sequencing QC Report")
-                
-                # Basic Stats Calculation
                 raw_n, trim_n = len(raw_reads), len(trimmed_reads)
-                raw_bases = sum(len(r) for r in raw_reads)
+                diff_n = raw_n - trim_n
                 trim_bases = sum(len(r) for r in trimmed_reads)
                 avg_len = trim_bases / trim_n if trim_n > 0 else 0
-                
-                # Row 1: Primary Metrics
+                perc_yield = (trim_n / raw_n * 100) if raw_n > 0 else 0
+
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("Raw Reads", format_indian_num(raw_n))
-                c2.metric("Filtered Reads", format_indian_num(trim_n))
+                c2.metric("Filtered Reads", format_indian_num(trim_n), f"{perc_yield:.2f}% Yield")
                 c3.metric("Total Bases", f"{trim_bases/1e6:.2f} Mb")
                 c4.metric("Avg Read Length", f"{int(avg_len)} bp")
 
                 st.markdown("---")
-                
-                # Row 2: Distribution Visuals
                 col_a, col_b = st.columns(2)
-                
                 with col_a:
-                    st.write("**Nucleotide Composition (Overall)**")
+                    st.write("**Nucleotide Composition**")
                     all_text = "".join(trimmed_reads[:500])
                     counts = {base: all_text.count(base) for base in "ACGT"}
                     fig_pie = go.Figure(data=[go.Pie(labels=list(counts.keys()), values=list(counts.values()), hole=.3)])
                     fig_pie.update_layout(template="plotly_dark", height=300, showlegend=False)
                     st.plotly_chart(fig_pie, use_container_width=True)
-                
                 with col_b:
                     st.write("**Read Length Distribution**")
                     lens = [len(r) for r in trimmed_reads[:1000]]
                     fig_hist = go.Figure(data=[go.Histogram(x=lens, marker_color='#00CC96')])
-                    fig_hist.update_layout(template="plotly_dark", height=300, xaxis_title="Length (bp)", yaxis_title="Frequency")
+                    fig_hist.update_layout(template="plotly_dark", height=300)
                     st.plotly_chart(fig_hist, use_container_width=True)
 
-                # Row 3: QC Parameters Table
-                st.write("**QC Filtering Parameters**")
-                qc_params = {
-                    "Parameter": ["Leading Trim", "Trailing Trim", "Minimum Length Threshold", "Quality Encoding"],
-                    "Value": ["5 bp", "5 bp", "60 bp", "Sanger / Phred 33"],
-                    "Status": ["Applied", "Applied", "Applied", "Verified"]
-                }
-                st.table(pd.DataFrame(qc_params))
+                st.markdown("---")
+                st.subheader("⚙️ Trimming & Identification Logic")
+                l1, l2 = st.columns(2)
+                with l1:
+                    st.info("**Slicing Logic (QC)**")
+                    st.write("- **Method:** Hard Trimming (5bp Leading/Trailing)")
+                    st.write("- **Threshold:** Discard if post-trim length < 60bp")
+                    st.write("- **Purpose:** Removes low-confidence adapter/primer regions.")
+                with l2:
+                    st.success("**Codon Identification (Annotation)**")
+                    st.write("- **Start Tag:** ATG (Methionine)")
+                    st.write("- **Stop Tags:** TAG, TAA, TGA")
+                    st.write("- **Min Length:** 300 bp (100 Amino Acids)")
 
             with tab2:
                 st.subheader("📈 Assembly & GC Skew Analysis")
                 st.latex(r"GC\ Skew = \frac{G - C}{G + C}")
-                
                 window = 500
                 skews, p_skew = [], []
                 for i in range(0, total_len - window, window):
@@ -111,13 +108,9 @@ if uploaded_file:
                     g, c = sub.count('G'), sub.count('C')
                     skews.append((g - c) / (g + c) if (g + c) > 0 else 0)
                     p_skew.append(i)
-                
                 fig_skew = go.Figure()
-                fig_skew.add_trace(go.Scatter(
-                    x=p_skew, y=skews, mode='lines', 
-                    customdata=[round(p/1000, 1) for p in p_skew],
-                    hovertemplate="Pos: %{customdata}k<br>Skew: %{y:.4f}<extra></extra>"
-                ))
+                fig_skew.add_trace(go.Scatter(x=p_skew, y=skews, mode='lines', customdata=[round(p/1000, 1) for p in p_skew],
+                    hovertemplate="Pos: %{customdata}k<br>Skew: %{y:.4f}<extra></extra>"))
                 fig_skew.add_hline(y=0, line_dash="dash", line_color="red")
                 fig_skew.update_layout(xaxis=dict(title="Genome Position", tickformat=".2s"), template="plotly_dark", showlegend=False)
                 st.plotly_chart(fig_skew, use_container_width=True)
@@ -126,7 +119,6 @@ if uploaded_file:
                 st.subheader("🧬 Annotation Comparison")
                 all_raw_orfs = find_all_orfs(full_genome)
                 final_genes_df = pd.DataFrame(all_raw_orfs).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
-                
                 orf_n, gene_n = len(all_raw_orfs), len(final_genes_df)
                 retention_perc = (gene_n / orf_n * 100) if orf_n > 0 else 0
                 reduction_perc = (100 - retention_perc)
@@ -140,35 +132,28 @@ if uploaded_file:
                 fig_map = go.Figure()
                 for strand in ["Forward", "Reverse"]:
                     sdf = final_genes_df[final_genes_df["Strand"] == strand]
-                    fig_map.add_trace(go.Bar(
-                        x=sdf["Length"], y=sdf["Strand"], base=sdf["Start"], 
-                        orientation='h', marker=dict(color=sdf["GC %"], colorscale='Viridis')
-                    ))
+                    fig_map.add_trace(go.Bar(x=sdf["Length"], y=sdf["Strand"], base=sdf["Start"], 
+                        orientation='h', marker=dict(color=sdf["GC %"], colorscale='Viridis')))
                 fig_map.update_layout(xaxis=dict(title="Position (bp)", type='linear'), template="plotly_dark", height=300, showlegend=False)
                 st.plotly_chart(fig_map, use_container_width=True)
-                
                 st.dataframe(final_genes_df.drop(columns=['Sequence']), use_container_width=True)
 
                 st.write("---")
                 st.subheader("📂 Multi-Format Export Center")
                 ex1, ex2, ex3, ex4 = st.columns(4)
-                
                 csv_data = final_genes_df.to_csv(index=False)
-                ex1.download_button("📄 Download CSV", csv_data, "genes.csv", "text/csv", use_container_width=True)
-                
+                ex1.download_button("📄 CSV", csv_data, "genes.csv", "text/csv", use_container_width=True)
                 json_data = final_genes_df.to_json(orient="records")
-                ex2.download_button("💻 Download JSON", json_data, "genes.json", "application/json", use_container_width=True)
-                
+                ex2.download_button("💻 JSON", json_data, "genes.json", "application/json", use_container_width=True)
                 gff = "##gff-version 3\n"
                 for i, row in final_genes_df.iterrows():
                     strand = "+" if row['Strand'] == "Forward" else "-"
                     gff += f"seq1\tDeNova\tCDS\t{row['Start']}\t{row['End']}\t.\t{strand}\t0\tID=gene_{i};GC={row['GC %']}\n"
-                ex3.download_button("🧬 Download GFF3", gff, "annotation.gff3", "text/plain", use_container_width=True)
-                
+                ex3.download_button("🧬 GFF3", gff, "annotation.gff3", "text/plain", use_container_width=True)
                 fasta = ""
                 for i, row in final_genes_df.iterrows():
-                    fasta += f">gene_{i} | {row['Strand']} | Start:{row['Start']} | GC:{row['GC %']}%\n{row['Sequence']}\n"
-                ex4.download_button("📝 Download FASTA", fasta, "sequences.fasta", "text/plain", use_container_width=True)
+                    fasta += f">gene_{i} | {row['Strand']} | GC:{row['GC %']}%\n{row['Sequence']}\n"
+                ex4.download_button("📝 FASTA", fasta, "sequences.fasta", "text/plain", use_container_width=True)
 
     except Exception as e:
         st.error(f"Error: {e}")
