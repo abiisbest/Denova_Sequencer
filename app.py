@@ -5,7 +5,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import numpy as np
 
-st.set_page_config(page_title="De Nova Professional Suite", layout="wide")
+st.set_page_config(page_title="De Novo Professional Suite", layout="wide")
 
 SPECIES_LIBRARY = {
     "Escherichia coli (K-12)": {"ref_gc": 50.8, "expected_genes": 4300, "genome_size": 4641652},
