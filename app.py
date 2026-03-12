@@ -4,6 +4,7 @@ import re
 import pandas as pd
 import plotly.graph_objects as go
 import numpy as np
+import io
 
 st.set_page_config(page_title="De Novo Professional Suite", layout="wide")
 
@@ -43,18 +44,44 @@ def find_all_orfs(sequence, min_len=300):
                 })
     return found_genes
 
-uploaded_file = st.file_uploader("Upload Raw FASTQ/GZ Data", type=["fastq", "fq", "gz"])
+def parse_genomic_file(uploaded_file):
+    filename = uploaded_file.name
+    if filename.endswith('.gz'):
+        content = gzip.decompress(uploaded_file.read()).decode("utf-8")
+    else:
+        content = uploaded_file.read().decode("utf-8")
+    
+    lines = content.splitlines()
+    reads = []
+    
+    if filename.endswith(('.fastq', '.fq', '.fastq.gz', '.fq.gz')):
+        reads = [line.strip() for line in lines[1::4] if line.strip()]
+    elif filename.endswith(('.fasta', '.fa', '.fna', '.fasta.gz', '.fa.gz', '.fna.gz')):
+        current_seq = []
+        for line in lines:
+            if line.startswith(">"):
+                if current_seq:
+                    reads.append("".join(current_seq))
+                current_seq = []
+            else:
+                current_seq.append(line.strip())
+        if current_seq:
+            reads.append("".join(current_seq))
+    else:
+        reads = [line.strip() for line in lines if line.strip() and not line.startswith(('@', '>', '+'))]
+        
+    return reads
+
+uploaded_file = st.file_uploader("Upload Genomic Data (FASTA, FASTQ, GZ)", type=["fastq", "fq", "fasta", "fa", "fna", "gz"])
 
 if uploaded_file:
     try:
-        if uploaded_file.name.endswith('.gz'):
-            data = gzip.decompress(uploaded_file.read()).decode("utf-8")
-        else:
-            data = uploaded_file.read().decode("utf-8")
+        raw_reads = parse_genomic_file(uploaded_file)
         
-        raw_lines = data.splitlines()
-        raw_reads = [line.strip() for line in raw_lines[1::4] if line.strip()]
-        
+        if not raw_reads:
+            st.error("No valid sequences found in the file.")
+            st.stop()
+
         sample_seq = "".join(raw_reads[:500])
         sample_gc = round((sample_seq.count('G') + sample_seq.count('C')) / len(sample_seq) * 100, 2)
         
@@ -69,7 +96,7 @@ if uploaded_file:
 
         if st.button("🚀 Run Full Analysis"):
             raw_len_avg = sum(len(r) for r in raw_reads) / len(raw_reads)
-            trimmed_reads = [r[5:-5] for r in raw_reads if len(r) > 60]
+            trimmed_reads = [r[5:-5] for r in raw_reads if len(r) > 60] if "fastq" in uploaded_file.name else raw_reads
             trim_len_avg = sum(len(r) for r in trimmed_reads) / len(trimmed_reads)
             
             full_genome = "NNNNN".join(trimmed_reads[:200]) 
@@ -80,23 +107,18 @@ if uploaded_file:
             tab1, tab2, tab3 = st.tabs(["📊 Sequencing QC Report", "🏗️ Reference Alignment", "🧬 Functional Annotation"])
 
             with tab1:
-                st.subheader("🛡️ Trimming & QC Comparison")
+                st.subheader("🛡️ Data Statistics")
                 col_qc1, col_qc2 = st.columns(2)
-                
                 with col_qc1:
-                    st.write("#### Before Trimming")
-                    st.metric("Total Reads", format_indian_num(len(raw_reads)))
-                    st.metric("Avg Read Length", f"{raw_len_avg:.1f} bp")
-
+                    st.metric("Total Contigs/Reads", format_indian_num(len(raw_reads)))
+                    st.metric("Avg Length", f"{raw_len_avg:.1f} bp")
                 with col_qc2:
-                    st.write("#### After Trimming")
-                    st.metric("Total Reads", format_indian_num(len(trimmed_reads)), f"{len(trimmed_reads)-len(raw_reads)}")
-                    st.metric("Avg Read Length", f"{trim_len_avg:.1f} bp", f"{trim_len_avg-raw_len_avg:.1f} bp")
+                    st.metric("Total Bases Processed", format_indian_num(sum(len(r) for r in trimmed_reads)))
+                    st.metric("Max Sequence Length", f"{max(len(r) for r in raw_reads):,} bp")
 
-                st.markdown("---")
                 results_data = {
-                    "Metric Parameter": ["Genomic GC Signature", "ORF Discovery Yield", "Coding Density", "Assembly Stability", "Reference Conformity"],
-                    "Observed Result": [f"{sample_gc}%", f"{len(genes_df)} features", f"{round((genes_df['Length'].sum()/total_len)*100, 2)}%", f"{int(total_len/2)} bp", f"{round(100 - abs(sample_gc - ref['ref_gc']), 2)}%"]
+                    "Metric Parameter": ["Genomic GC Signature", "ORF Discovery Yield", "Coding Density", "Reference Conformity"],
+                    "Observed Result": [f"{sample_gc}%", f"{len(genes_df)} features", f"{round((genes_df['Length'].sum()/total_len)*100, 2)}%", f"{round(100 - abs(sample_gc - ref['ref_gc']), 2)}%"]
                 }
                 st.table(pd.DataFrame(results_data))
 
@@ -105,7 +127,7 @@ if uploaded_file:
                 current_gc = round((full_genome.count('G') + full_genome.count('C')) / len(full_genome) * 100, 2)
                 st.metric("Sample GC %", f"{current_gc}%", f"{current_gc - ref['ref_gc']:.2f}% Dev from Ref")
 
-                window = 500
+                window = max(100, total_len // 100)
                 p_skew, skews = [], []
                 for i in range(0, total_len - window, window):
                     sub = full_genome[i:i+window]
@@ -115,48 +137,17 @@ if uploaded_file:
 
                 fig_skew = go.Figure()
                 skews_np = np.array(skews)
-                pos_skew = np.where(skews_np >= 0, skews_np, 0)
-                neg_skew = np.where(skews_np < 0, skews_np, 0)
-
-                fig_skew.add_trace(go.Scatter(x=p_skew, y=pos_skew, fill='tozeroy', mode='lines', line=dict(color='#00CC96', width=0), name='Positive Skew (G > C)'))
-                fig_skew.add_trace(go.Scatter(x=p_skew, y=neg_skew, fill='tozeroy', mode='lines', line=dict(color='#EF553B', width=0), name='Negative Skew (C > G)'))
-                fig_skew.add_trace(go.Scatter(x=p_skew, y=skews, mode='lines', line=dict(color='white', width=1), showlegend=False))
-                
-                fig_skew.add_shape(type="line", x0=0, y0=0, x1=max(p_skew), y1=0, line=dict(color="gray", width=2, dash="dash"))
-                fig_skew.update_layout(title="Bicolor GC Skew Analysis", xaxis=dict(title="Genome Position"), yaxis=dict(title="Skew Value"), template="plotly_dark", height=400)
+                fig_skew.add_trace(go.Scatter(x=p_skew, y=np.where(skews_np >= 0, skews_np, 0), fill='tozeroy', mode='lines', line=dict(color='#00CC96', width=0), name='Pos Skew'))
+                fig_skew.add_trace(go.Scatter(x=p_skew, y=np.where(skews_np < 0, skews_np, 0), fill='tozeroy', mode='lines', line=dict(color='#EF553B', width=0), name='Neg Skew'))
+                fig_skew.update_layout(title="GC Skew Analysis", template="plotly_dark", height=400)
                 st.plotly_chart(fig_skew, use_container_width=True)
 
             with tab3:
                 st.subheader("🧬 Annotation Performance")
-                ac1, ac2 = st.columns(2)
-                ac1.metric("Observed Genes", len(genes_df))
-                ac2.metric("Reference Expected", ref['expected_genes'], f"{len(genes_df) - ref['expected_genes']} Delta")
-                
-                fig_map = go.Figure()
-                for strand in ["Forward", "Reverse"]:
-                    sdf = genes_df[genes_df["Strand"] == strand].copy()
-                    last_end, plot_data = 0, []
-                    for _, row in sdf.iterrows():
-                        if row['Start'] > last_end:
-                            plot_data.append({"Start": last_end, "Len": row['Start'] - last_end, "Type": "Non-Coding"})
-                        plot_data.append({"Start": row['Start'], "Len": row['Length'], "Type": "Gene"})
-                        last_end = row['End']
-                    pdf = pd.DataFrame(plot_data)
-                    colors = ['#333333' if t == "Non-Coding" else '#00CC96' for t in pdf['Type']]
-                    fig_map.add_trace(go.Bar(x=pdf["Len"], y=[strand]*len(pdf), base=pdf["Start"], orientation='h', marker=dict(color=colors)))
-                
-                fig_map.update_layout(title="ORF Mapping", xaxis=dict(title="Position (bp)"), barmode='stack', template="plotly_dark", height=300, showlegend=False)
-                st.plotly_chart(fig_map, use_container_width=True)
                 st.dataframe(genes_df.drop(columns=['Sequence', 'Type']), use_container_width=True)
-
-                st.subheader("📂 Export Center")
-                ex1, ex2, ex3, ex4 = st.columns(4)
-                ex1.download_button("📄 CSV", genes_df.to_csv(index=False), "results.csv", use_container_width=True)
-                ex2.download_button("💻 JSON", genes_df.to_json(orient="records"), "results.json", use_container_width=True)
-                gff = "##gff-version 3\n" + "".join([f"seq1\tDeNova\tCDS\t{r['Start']}\t{r['End']}\t.\t{'+' if r['Strand']=='Forward' else '-'}\t0\tID=gene_{i}\n" for i, r in genes_df.iterrows()])
-                ex3.download_button("🧬 GFF3", gff, "annotation.gff3", use_container_width=True)
-                fasta = "".join([f">gene_{i}\n{r['Sequence']}\n" for i, r in genes_df.iterrows()])
-                ex4.download_button("📝 FASTA", fasta, "sequences.fasta", use_container_width=True)
+                
+                fasta_out = "".join([f">gene_{i}\n{r['Sequence']}\n" for i, r in genes_df.iterrows()])
+                st.download_button("📝 Download FASTA Proteins", fasta_out, "predicted_genes.fasta")
 
     except Exception as e:
         st.error(f"Analysis Error: {e}")
