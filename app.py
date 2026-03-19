@@ -8,68 +8,44 @@ import numpy as np
 st.set_page_config(page_title="De Novo Professional Suite", layout="wide")
 
 SPECIES_LIBRARY = {
-    "Escherichia coli (K-12)": {"ref_gc": 50.8, "expected_genes": 4300, "type": "Gram-Negative"},
-    "Staphylococcus aureus": {"ref_gc": 32.8, "expected_genes": 2800, "type": "Gram-Positive"},
-    "Bacillus subtilis": {"ref_gc": 43.5, "expected_genes": 4200, "type": "Gram-Positive"},
-    "Saccharomyces cerevisiae (Yeast)": {"ref_gc": 38.3, "expected_genes": 6000, "type": "Eukaryote"},
-    "Mycobacterium tuberculosis": {"ref_gc": 65.6, "expected_genes": 4000, "type": "Acid-Fast"}
+    "Escherichia coli (K-12)": {"ref_gc": 50.8, "expected_genes": 4300, "genome_size": 4641652},
+    "Staphylococcus aureus": {"ref_gc": 32.8, "expected_genes": 2800, "genome_size": 2821361},
+    "Bacillus subtilis": {"ref_gc": 43.5, "expected_genes": 4200, "genome_size": 4214630},
+    "Saccharomyces cerevisiae (Yeast)": {"ref_gc": 38.3, "expected_genes": 6000, "genome_size": 12157105},
+    "Mycobacterium tuberculosis": {"ref_gc": 65.6, "expected_genes": 4000, "genome_size": 4411532}
 }
 
-def remove_adapters(reads, adapter_seq, min_keep_len):
-    cleaned_reads = []
-    for read in reads:
-        if adapter_seq and adapter_seq in read:
-            read = read.split(adapter_seq)[0]
-        if len(read) >= min_keep_len:
-            cleaned_reads.append(read)
-    return cleaned_reads
+st.title("🧬 De Novo: Auto-Identifying Genomic Pipeline")
+st.markdown("---")
+
+def format_indian_num(n):
+    if n >= 100000:
+        return f"{n/100000:.2f}L"
+    return f"{n:,}"
 
 def get_rev_complement(seq):
     complement = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', 'N': 'N'}
     return "".join(complement.get(base, base) for base in reversed(seq))
 
-def annotate_gene(seq, species_gc):
-    gc = (seq.count('G') + seq.count('C')) / len(seq) * 100
-    length = len(seq)
-    
-    if length > 1200:
-        return "Polymerase/Replication Factor"
-    elif abs(gc - species_gc) > 5:
-        return "Horizontal Gene Transfer (HGT) Candidate"
-    elif length > 600:
-        return "Metabolic Enzyme"
-    else:
-        return "Hypothetical Protein"
-
-def find_all_orfs(sequence, species_gc, min_len=300):
+def find_all_orfs(sequence, min_len=300):
     found_genes = []
     pattern = re.compile(r'(ATG(?:...){%d,1000}?(?:TAG|TAA|TGA))' % (min_len // 3))
-    for strand_name, strand_sign in [("Forward", "+"), ("Reverse", "-")]:
-        dna = sequence if strand_name == "Forward" else get_rev_complement(sequence)
+    for strand in ["Forward", "Reverse"]:
+        dna = sequence if strand == "Forward" else get_rev_complement(sequence)
         for frame in range(3):
             for match in pattern.finditer(dna[frame:]):
                 gene_seq = match.group()
                 start_pos = match.start() + frame
-                
                 found_genes.append({
-                    "Locus_Tag": f"GENE_{len(found_genes)+1:04d}",
-                    "Strand": strand_sign,
-                    "Start": int(start_pos),
-                    "End": int(start_pos + len(gene_seq)),
-                    "Length": int(len(gene_seq)),
-                    "GC_%": round((gene_seq.count('G') + gene_seq.count('C')) / len(gene_seq) * 100, 2),
-                    "Function": annotate_gene(gene_seq, species_gc),
-                    "Sequence": gene_seq
+                    "Strand": strand, "Start": int(start_pos), "End": int(start_pos + len(gene_seq)),
+                    "Length": int(len(gene_seq)), "GC %": round((gene_seq.count('G') + gene_seq.count('C')) / len(gene_seq) * 100, 2),
+                    "Sequence": gene_seq, "Type": "Gene"
                 })
     return found_genes
 
-st.title("🧬 De Novo: Auto-Identifying Genomic Pipeline")
-st.markdown("---")
-
 st.sidebar.header("⚙️ Pipeline Settings")
 trim_adapters = st.sidebar.checkbox("Enable Adapter Trimming", value=True)
-adapter_sequence = st.sidebar.text_input("Adapter Sequence", "AGATCGGAAGAG")
-min_len_filter = st.sidebar.slider("Minimum Read Length (bp)", 0, 100, 15)
+trim_length = st.sidebar.slider("Adapter Trim Length (bp)", 0, 30, 5)
 
 uploaded_file = st.file_uploader("Upload Raw FASTQ/GZ Data", type=["fastq", "fq", "gz"])
 
@@ -80,46 +56,132 @@ if uploaded_file:
         else:
             data = uploaded_file.read().decode("utf-8")
         
-        raw_reads = [line.strip() for line in data.splitlines()[1::4] if line.strip()]
+        raw_lines = data.splitlines()
+        raw_reads = [line.strip() for line in raw_lines[1::4] if line.strip()]
         
         if not raw_reads:
-            st.error("No valid DNA reads found.")
+            st.error("No valid DNA reads found in file.")
             st.stop()
 
-        sample_gc = round(("".join(raw_reads[:100]).count('G') + "".join(raw_reads[:100]).count('C')) / len("".join(raw_reads[:100])) * 100, 2)
+        sample_seq = "".join(raw_reads[:500])
+        sample_gc = round((sample_seq.count('G') + sample_seq.count('C')) / len(sample_seq) * 100, 2)
         closest_species = min(SPECIES_LIBRARY.keys(), key=lambda x: abs(SPECIES_LIBRARY[x]['ref_gc'] - sample_gc))
         
-        st.info(f"Predicted Species: **{closest_species}** (GC: {sample_gc}%)")
-        ref = SPECIES_LIBRARY[closest_species]
+        st.subheader("🤖 Auto-Identification Result")
+        st.info(f"Sample GC Content: **{sample_gc}%** | Predicted Species: **{closest_species}**")
+        
+        is_correct = st.radio("Confirm Species Identity:", ("Yes, proceed with prediction", "No, let me choose manually"))
+        selected_species = closest_species if is_correct == "Yes, proceed with prediction" else st.selectbox("Select Species", list(SPECIES_LIBRARY.keys()))
+        ref = SPECIES_LIBRARY.get(selected_species)
 
-        if st.button("🚀 Run Full Annotation"):
-            trimmed_reads = remove_adapters(raw_reads, adapter_sequence, min_len_filter) if trim_adapters else raw_reads
+        if st.button("🚀 Run Full Analysis"):
+            raw_len_avg = sum(len(r) for r in raw_reads) / len(raw_reads)
             
+            if trim_adapters:
+                trimmed_reads = [r[trim_length:-trim_length] for r in raw_reads if len(r) > (60 + 2*trim_length)]
+            else:
+                trimmed_reads = [r for r in raw_reads if len(r) > 60]
+                
             if not trimmed_reads:
-                st.error("Trimming removed all reads. Lower the 'Minimum Read Length' in sidebar.")
+                st.warning("Trimming settings removed all reads. Please adjust length filters.")
                 st.stop()
 
-            full_genome = "NNNNN".join(trimmed_reads[:200])
-            all_orfs = find_all_orfs(full_genome, ref['ref_gc'])
-            genes_df = pd.DataFrame(all_orfs).sort_values('Start').drop_duplicates(subset=['Start'])
-
-            tab1, tab2 = st.tabs(["📊 Quality Control", "🧬 Functional Annotation"])
+            trim_len_avg = sum(len(r) for r in trimmed_reads) / len(trimmed_reads)
+            full_genome = "NNNNN".join(trimmed_reads[:200]) 
+            total_len = len(full_genome)
+            
+            all_raw_orfs = find_all_orfs(full_genome)
+            
+            if all_raw_orfs:
+                genes_df = pd.DataFrame(all_raw_orfs).sort_values('Start').drop_duplicates(subset=['Start'], keep='first')
+            else:
+                genes_df = pd.DataFrame(columns=["Strand", "Start", "End", "Length", "GC %", "Sequence", "Type"])
+            
+            tab1, tab2, tab3 = st.tabs(["📊 Sequencing QC Report", "🏗️ Reference Alignment", "🧬 Functional Annotation"])
 
             with tab1:
-                col1, col2 = st.columns(2)
-                col1.metric("Reads Processed", len(trimmed_reads))
-                col2.metric("Morphology", ref['type'])
-                if "Gram-Positive" in ref['type']:
-                    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Gram_positive_cell_wall.svg/300px-Gram_positive_cell_wall.svg.png")
-                else:
-                    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/d/d3/Gram_negative_cell_wall.svg/300px-Gram_negative_cell_wall.svg.png")
+                st.subheader("🛡️ Trimming & QC Comparison")
+                col_qc1, col_qc2 = st.columns(2)
+                with col_qc1:
+                    st.write("#### Before Trimming")
+                    st.metric("Total Reads", format_indian_num(len(raw_reads)))
+                    st.metric("Avg Read Length", f"{raw_len_avg:.1f} bp")
+                with col_qc2:
+                    st.write("#### After Trimming")
+                    st.metric("Total Reads", format_indian_num(len(trimmed_reads)), f"{len(trimmed_reads)-len(raw_reads)}")
+                    st.metric("Avg Read Length", f"{trim_len_avg:.1f} bp", f"{trim_len_avg-raw_len_avg:.1f} bp")
+
+                st.markdown("---")
+                results_data = {
+                    "Metric Parameter": ["Genomic GC Signature", "ORF Discovery Yield", "Coding Density", "Reference Conformity"],
+                    "Observed Result": [
+                        f"{sample_gc}%", 
+                        f"{len(genes_df)} features", 
+                        f"{round((genes_df['Length'].sum()/total_len)*100, 2) if not genes_df.empty else 0}%", 
+                        f"{round(100 - abs(sample_gc - ref['ref_gc']), 2)}%"
+                    ]
+                }
+                st.table(pd.DataFrame(results_data))
 
             with tab2:
-                st.subheader("📝 Gene Feature Table")
-                st.dataframe(genes_df.drop(columns=['Sequence']), use_container_width=True)
-                
-                gff = "##gff-version 3\n" + "\n".join([f"contig1\tDeNovo\tCDS\t{r['Start']}\t{r['End']}\t.\t{r['Strand']}\t0\tID={r['Locus_Tag']};Note={r['Function']}" for i, r in genes_df.iterrows()])
-                st.download_button("💾 Download GFF3 Annotation", gff, "annotation.gff3")
+                st.subheader("🏗️ Structural Landmark Analysis")
+                current_gc = round((full_genome.count('G') + full_genome.count('C')) / (len(full_genome) - full_genome.count('N')) * 100, 2)
+                st.metric("Genome GC %", f"{current_gc}%", f"{current_gc - ref['ref_gc']:.2f}% Dev")
+
+                window = 500
+                p_skew, skews = [], []
+                for i in range(0, total_len - window, window):
+                    sub = full_genome[i:i+window]
+                    g, c = sub.count('G'), sub.count('C')
+                    skews.append((g - c) / (g + c) if (g + c) > 0 else 0)
+                    p_skew.append(i)
+
+                fig_skew = go.Figure()
+                skews_np = np.array(skews)
+                pos_skew = np.where(skews_np >= 0, skews_np, 0)
+                neg_skew = np.where(skews_np < 0, skews_np, 0)
+
+                fig_skew.add_trace(go.Scatter(x=p_skew, y=pos_skew, fill='tozeroy', mode='lines', line=dict(color='#00CC96', width=0), name='Positive Skew (G > C)'))
+                fig_skew.add_trace(go.Scatter(x=p_skew, y=neg_skew, fill='tozeroy', mode='lines', line=dict(color='#EF553B', width=0), name='Negative Skew (C > G)'))
+                fig_skew.add_trace(go.Scatter(x=p_skew, y=skews, mode='lines', line=dict(color='white', width=1.5), showlegend=False))
+                fig_skew.add_shape(type="line", x0=0, y0=0, x1=max(p_skew), y1=0, line=dict(color="gray", width=2, dash="dash"))
+                fig_skew.update_layout(title="GC Skew (OriC Identification)", xaxis=dict(title="Position"), yaxis=dict(title="Skew"), template="plotly_dark")
+                st.plotly_chart(fig_skew, use_container_width=True)
+
+            with tab3:
+                st.subheader("🧬 Functional Annotation")
+                if genes_df.empty:
+                    st.warning("No Open Reading Frames detected. Try adjusting trimming or uploading a larger file.")
+                else:
+                    ac1, ac2 = st.columns(2)
+                    ac1.metric("Observed Genes", len(genes_df))
+                    ac2.metric("Ref. Expected", ref['expected_genes'], f"{len(genes_df) - ref['expected_genes']} Delta")
+                    
+                    fig_map = go.Figure()
+                    for strand in ["Forward", "Reverse"]:
+                        sdf = genes_df[genes_df["Strand"] == strand].copy()
+                        last_end, plot_data = 0, []
+                        for _, row in sdf.iterrows():
+                            if row['Start'] > last_end:
+                                plot_data.append({"Start": last_end, "Len": row['Start'] - last_end, "Type": "Non-Coding"})
+                            plot_data.append({"Start": row['Start'], "Len": row['Length'], "Type": "Gene"})
+                            last_end = row['End']
+                        pdf = pd.DataFrame(plot_data)
+                        colors = ['#333333' if t == "Non-Coding" else '#00CC96' for t in pdf['Type']]
+                        fig_map.add_trace(go.Bar(x=pdf["Len"], y=[strand]*len(pdf), base=pdf["Start"], orientation='h', marker=dict(color=colors)))
+                    
+                    fig_map.update_layout(title="ORF Mapping", barmode='stack', template="plotly_dark", height=300, showlegend=False)
+                    st.plotly_chart(fig_map, use_container_width=True)
+                    st.dataframe(genes_df.drop(columns=['Sequence', 'Type']), use_container_width=True)
+
+                    st.subheader("📂 Export Center")
+                    ex1, ex2, ex3, ex4 = st.columns(4)
+                    ex1.download_button("📄 CSV", genes_df.to_csv(index=False), "results.csv", use_container_width=True)
+                    ex2.download_button("💻 JSON", genes_df.to_json(orient="records"), "results.json", use_container_width=True)
+                    gff = "##gff-version 3\n" + "".join([f"seq1\tDeNova\tCDS\t{r['Start']}\t{r['End']}\t.\t{'+' if r['Strand']=='Forward' else '-'}\t0\tID=gene_{i}\n" for i, r in genes_df.iterrows()])
+                    ex3.download_button("🧬 GFF3", gff, "annotation.gff3", use_container_width=True)
+                    fasta = "".join([f">gene_{i}\n{r['Sequence']}\n" for i, r in genes_df.iterrows()])
+                    ex4.download_button("📝 FASTA", fasta, "sequences.fasta", use_container_width=True)
 
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"System Error: {e}")
