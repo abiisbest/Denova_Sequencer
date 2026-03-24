@@ -61,7 +61,7 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("🛡️ Trimming Settings")
 trim_active = st.sidebar.toggle("Enable QC Trimming", value=True)
 adapter_seq = st.sidebar.text_input("Adapter Sequence", "AGATCGGAAGAG")
-min_read_len = st.sidebar.slider("Min Length Threshold", 10, 500, 30)
+min_read_len = st.sidebar.slider("Min Length Threshold", 10, 1000, 30)
 
 st.title("🧬 De Novo: Professional Genomic Suite")
 
@@ -73,7 +73,19 @@ if uploaded_file:
         lines = content.splitlines()
         is_fasta = any(line.startswith('>') for line in lines[:5])
         
-        raw_reads = ["".join([l.strip() for l in lines if l.strip() and not l.startswith('>')])] if is_fasta else [l.strip() for l in lines[1::4] if l.strip()]
+        if is_fasta:
+            # For FASTA, we treat each header block as a 'read'
+            raw_reads = []
+            current_seq = []
+            for line in lines:
+                if line.startswith(">"):
+                    if current_seq: raw_reads.append("".join(current_seq))
+                    current_seq = []
+                else:
+                    current_seq.append(line.strip())
+            if current_seq: raw_reads.append("".join(current_seq))
+        else:
+            raw_reads = [l.strip() for l in lines[1::4] if l.strip()]
 
         raw_count = len(raw_reads)
         raw_avg_len = sum(len(r) for r in raw_reads) / raw_count if raw_count > 0 else 0
@@ -85,11 +97,7 @@ if uploaded_file:
             proc_avg_len = sum(len(r) for r in processed_reads) / proc_count if proc_count > 0 else 0
             proc_max_len = max([len(r) for r in processed_reads]) if proc_count > 0 else 0
 
-            if proc_count == 0:
-                st.error("QC filters removed all reads. Adjust settings.")
-                st.stop()
-
-            full_seq = "NNNNN".join(processed_reads[:1000])
+            full_seq = "NNNNN".join(processed_reads)
             total_len = len(full_seq)
             raw_genes = find_all_orfs(full_seq, min_len=min_orf_len, allow_partial=allow_partial)
             df = pd.DataFrame(raw_genes)
@@ -98,19 +106,13 @@ if uploaded_file:
             
             with t1:
                 st.subheader("🛡️ Trimming & QC Comparison")
-                
-                # Comparison Table Logic
                 comparison_data = {
-                    "Metric": ["Total Reads", "Average Length (bp)", "Maximum Length (bp)"],
+                    "Metric": ["Total Sequences/Reads", "Average Length (bp)", "Maximum Length (bp)"],
                     "Before (Raw)": [raw_count, f"{raw_avg_len:.1f}", raw_max_len],
                     "After (Trimmed)": [proc_count, f"{proc_avg_len:.1f}", proc_max_len],
                     "Change": [proc_count - raw_count, f"{proc_avg_len - raw_avg_len:.1f}", proc_max_len - raw_max_len]
                 }
                 st.table(pd.DataFrame(comparison_data))
-
-                col1, col2 = st.columns(2)
-                col1.metric("Retention Rate", f"{(proc_count/raw_count)*100:.1f}%")
-                col2.metric("ORFs Detected", len(df))
                 
                 if not df.empty:
                     st.dataframe(df.drop(columns=['Sequence']), use_container_width=True)
