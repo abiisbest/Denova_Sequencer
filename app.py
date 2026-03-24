@@ -11,6 +11,7 @@ st.set_page_config(page_title="De Novo: Genomic Suite", layout="wide")
 SPECIES_LIBRARY = {
     "Escherichia coli (K-12)": {"ref_gc": 50.8, "type": "Circular", "expected_genes": 4300},
     "Staphylococcus aureus": {"ref_gc": 32.8, "type": "Circular", "expected_genes": 2800},
+    "Bacillus subtilis": {"ref_gc": 43.5, "type": "Circular", "expected_genes": 4200},
     "Homo sapiens (Partial mRNA)": {"ref_gc": 41.0, "type": "Linear", "expected_genes": 1}
 }
 
@@ -29,6 +30,7 @@ def remove_adapters(reads, adapter_seq, min_keep_len):
     return cleaned_reads
 
 def calculate_n50(lengths):
+    if not lengths: return 0
     lengths.sort(reverse=True)
     total_sum = sum(lengths)
     current_sum = 0
@@ -37,6 +39,16 @@ def calculate_n50(lengths):
         if current_sum >= total_sum / 2:
             return length
     return 0
+
+def calculate_gc_skew(sequence, window=500):
+    res, indices = [], []
+    for i in range(0, len(sequence) - window, window):
+        sub = sequence[i:i+window]
+        g, c = sub.count('G'), sub.count('C')
+        skew = (g - c) / (g + c) if (g + c) > 0 else 0
+        res.append(skew)
+        indices.append(i)
+    return indices, res
 
 def find_all_orfs(sequence, min_len=300, allow_partial=True):
     found_genes = []
@@ -55,10 +67,12 @@ def find_all_orfs(sequence, min_len=300, allow_partial=True):
                 start_pos = match.start() + frame
                 found_genes.append({
                     "Strand": strand, "Start": int(start_pos), "End": int(start_pos + len(gene_seq)),
-                    "Length": int(len(gene_seq)), "GC %": round((gene_seq.count('G') + gene_seq.count('C')) / len(gene_seq) * 100, 2),
+                    "Length": int(len(gene_seq)), 
+                    "GC %": round((gene_seq.count('G') + gene_seq.count('C')) / len(gene_seq) * 100, 2),
                     "Sequence": gene_seq
                 })
     
+    # Filter Overlaps (Keep longest)
     sorted_genes = sorted(found_genes, key=lambda x: x['Length'], reverse=True)
     final_genes, covered = [], []
     for g in sorted_genes:
@@ -69,7 +83,6 @@ def find_all_orfs(sequence, min_len=300, allow_partial=True):
     final_genes = sorted(final_genes, key=lambda x: x['Start'])
     for i, gene in enumerate(final_genes):
         gene['Name'] = f"ORF_{i+1}"
-        
     return final_genes
 
 # --- 3. UI SIDEBAR ---
@@ -83,7 +96,7 @@ st.sidebar.subheader("🛡️ QC & Trimming")
 adapter_seq = st.sidebar.text_input("Adapter Sequence", "AGATCGGAAGAG")
 min_read_len = st.sidebar.slider("Min Length Threshold", 10, 500, 30)
 
-# --- 4. PROCESSING ---
+# --- 4. MAIN INTERFACE ---
 st.title("🧬 De Novo: Professional Genomic Suite")
 
 uploaded_file = st.file_uploader("Upload FASTA or FASTQ", type=["fasta", "fa", "fastq", "fq", "gz", "txt"])
@@ -97,8 +110,7 @@ if uploaded_file:
         
         # Raw Data Metrics
         if is_fasta:
-            raw_reads = []
-            curr = []
+            raw_reads, curr = [], []
             for l in lines:
                 if l.startswith(">"):
                     if curr: raw_reads.append("".join(curr))
@@ -111,31 +123,34 @@ if uploaded_file:
         raw_count = len(raw_reads)
         raw_lengths = [len(r) for r in raw_reads]
         
-        st.info(f"**Format:** {'FASTA' if is_fasta else 'FASTQ'} | **Initial Reads:** {raw_count}")
+        st.info(f"**Format Detected:** {'FASTA' if is_fasta else 'FASTQ'} | **Initial Sequences:** {raw_count}")
 
         if st.button("🚀 Run Full Pipeline"):
-            # Trimming Logic
+            # 1. Trimming Logic
             processed_reads = remove_adapters(raw_reads, adapter_seq, min_read_len)
             proc_count = len(processed_reads)
             proc_lengths = [len(r) for r in processed_reads]
             
             if proc_count == 0:
-                st.error("QC filtered out all reads. Check your length threshold.")
+                st.error("QC filters removed all data. Lower the 'Min Length Threshold'.")
                 st.stop()
 
+            # 2. Sequence Consolidation
             full_seq = "NNNNN".join(processed_reads)
             total_len = len(full_seq)
             sample_gc = round((full_seq.count('G') + full_seq.count('C')) / (total_len - full_seq.count('N') + 1) * 100, 2)
             
+            # 3. ORF Discovery
             raw_genes = find_all_orfs(full_seq, min_len=min_orf_len, allow_partial=allow_partial)
             df = pd.DataFrame(raw_genes)
             
+            # 4. Dashboard Tabs
             t1, t2, t3 = st.tabs(["📊 QC Report", "🏗️ Assembly Metrics", "🧬 Genomic Map"])
             
             with t1:
                 st.subheader("🛡️ Trimming & QC Comparison")
                 qc_df = pd.DataFrame({
-                    "Metric": ["Total Reads/Contigs", "Average Length (bp)", "Max Length (bp)"],
+                    "Metric": ["Total Sequences", "Avg Length (bp)", "Max Length (bp)"],
                     "Before (Raw)": [raw_count, f"{np.mean(raw_lengths):.1f}", max(raw_lengths)],
                     "After (Processed)": [proc_count, f"{np.mean(proc_lengths):.1f}", max(proc_lengths)],
                     "Change": [proc_count - raw_count, f"{np.mean(proc_lengths)-np.mean(raw_lengths):.1f}", max(proc_lengths)-max(raw_lengths)]
@@ -146,7 +161,6 @@ if uploaded_file:
                 st.subheader("🏗️ Assembly Quality Statistics")
                 c1, c2, c3 = st.columns(3)
                 
-                # Calculate N50
                 n50_val = calculate_n50(proc_lengths)
                 coding_density = (df['Length'].sum() / total_len) * 100 if not df.empty else 0
                 
@@ -154,19 +168,25 @@ if uploaded_file:
                 c2.metric("Coding Density", f"{coding_density:.1f}%")
                 c3.metric("GC Content", f"{sample_gc}%")
                 
-                if not df.empty:
-                    st.write("#### ORF Feature Table")
-                    st.dataframe(df.drop(columns=['Sequence']), use_container_width=True)
+                st.markdown("---")
+                st.subheader("📈 GC Skew Analysis")
+                idx, skew_vals = calculate_gc_skew(full_seq)
+                
+                fig_skew = go.Figure()
+                fig_skew.add_trace(go.Scatter(x=idx, y=skew_vals, mode='lines', line=dict(color='#00CC96', width=2), fill='tozeroy', name='GC Skew'))
+                fig_skew.add_shape(type="line", x0=0, y0=0, x1=max(idx) if idx else 0, y1=0, line=dict(color="white", width=1, dash="dash"))
+                fig_skew.update_layout(template="plotly_dark", xaxis_title="Position (bp)", yaxis_title="Skew Value", height=400)
+                st.plotly_chart(fig_skew, use_container_width=True)
 
             with t3:
                 if df.empty:
-                    st.warning("No genes found.")
+                    st.warning("No genes found. Try reducing 'Minimum ORF Length'.")
                 elif viz_mode == "Linear Track":
                     fig = go.Figure()
                     for _, row in df.iterrows():
                         clr = "#00CC96" if row['Strand'] == "Forward" else "#EF553B"
                         fig.add_trace(go.Bar(name=row['Name'], x=[row['Length']], y=[row['Strand']], base=[row['Start']], orientation='h', marker_color=clr))
-                    fig.update_layout(template="plotly_dark", barmode='stack', title="Linear ORF Map")
+                    fig.update_layout(template="plotly_dark", barmode='stack', title="Linear ORF Map", xaxis_title="Position (bp)")
                     st.plotly_chart(fig, use_container_width=True)
                 else:
                     df['S_Ang'], df['E_Ang'] = (df['Start']/total_len)*360, (df['End']/total_len)*360
@@ -176,6 +196,10 @@ if uploaded_file:
                         fig.add_trace(go.Barpolar(name=row['Name'], r=[0.4], theta=[(row['S_Ang']+row['E_Ang'])/2], width=[max(1, row['E_Ang']-row['S_Ang'])], base=track, marker_color=clr))
                     fig.update_layout(template="plotly_dark", polar=dict(hole=0.4, radialaxis=dict(visible=False)), height=700, title="Circular Genome Map")
                     st.plotly_chart(fig, use_container_width=True)
+                
+                if not df.empty:
+                    st.subheader("📂 Feature Annotation Data")
+                    st.dataframe(df.drop(columns=['Sequence']), use_container_width=True)
 
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"System Error: {e}")
