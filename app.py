@@ -4,6 +4,7 @@ import re
 import pandas as pd
 import plotly.graph_objects as go
 import numpy as np
+import io
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="De Novo: Genomic Suite", layout="wide")
@@ -72,7 +73,6 @@ def find_all_orfs(sequence, min_len=300, allow_partial=True):
                     "Sequence": gene_seq
                 })
     
-    # Filter Overlaps (Keep longest)
     sorted_genes = sorted(found_genes, key=lambda x: x['Length'], reverse=True)
     final_genes, covered = [], []
     for g in sorted_genes:
@@ -108,7 +108,6 @@ if uploaded_file:
         lines = content.splitlines()
         is_fasta = any(line.startswith('>') for line in lines[:5])
         
-        # Raw Data Metrics
         if is_fasta:
             raw_reads, curr = [], []
             for l in lines:
@@ -126,7 +125,6 @@ if uploaded_file:
         st.info(f"**Format Detected:** {'FASTA' if is_fasta else 'FASTQ'} | **Initial Sequences:** {raw_count}")
 
         if st.button("🚀 Run Full Pipeline"):
-            # 1. Trimming Logic
             processed_reads = remove_adapters(raw_reads, adapter_seq, min_read_len)
             proc_count = len(processed_reads)
             proc_lengths = [len(r) for r in processed_reads]
@@ -135,16 +133,13 @@ if uploaded_file:
                 st.error("QC filters removed all data. Lower the 'Min Length Threshold'.")
                 st.stop()
 
-            # 2. Sequence Consolidation
             full_seq = "NNNNN".join(processed_reads)
             total_len = len(full_seq)
             sample_gc = round((full_seq.count('G') + full_seq.count('C')) / (total_len - full_seq.count('N') + 1) * 100, 2)
             
-            # 3. ORF Discovery
             raw_genes = find_all_orfs(full_seq, min_len=min_orf_len, allow_partial=allow_partial)
             df = pd.DataFrame(raw_genes)
             
-            # 4. Dashboard Tabs
             t1, t2, t3 = st.tabs(["📊 QC Report", "🏗️ Assembly Metrics", "🧬 Genomic Map"])
             
             with t1:
@@ -160,10 +155,8 @@ if uploaded_file:
             with t2:
                 st.subheader("🏗️ Assembly Quality Statistics")
                 c1, c2, c3 = st.columns(3)
-                
                 n50_val = calculate_n50(proc_lengths)
                 coding_density = (df['Length'].sum() / total_len) * 100 if not df.empty else 0
-                
                 c1.metric("N50 Score", f"{n50_val} bp")
                 c2.metric("Coding Density", f"{coding_density:.1f}%")
                 c3.metric("GC Content", f"{sample_gc}%")
@@ -171,7 +164,6 @@ if uploaded_file:
                 st.markdown("---")
                 st.subheader("📈 GC Skew Analysis")
                 idx, skew_vals = calculate_gc_skew(full_seq)
-                
                 fig_skew = go.Figure()
                 fig_skew.add_trace(go.Scatter(x=idx, y=skew_vals, mode='lines', line=dict(color='#00CC96', width=2), fill='tozeroy', name='GC Skew'))
                 fig_skew.add_shape(type="line", x0=0, y0=0, x1=max(idx) if idx else 0, y1=0, line=dict(color="white", width=1, dash="dash"))
@@ -180,25 +172,44 @@ if uploaded_file:
 
             with t3:
                 if df.empty:
-                    st.warning("No genes found. Try reducing 'Minimum ORF Length'.")
-                elif viz_mode == "Linear Track":
-                    fig = go.Figure()
-                    for _, row in df.iterrows():
-                        clr = "#00CC96" if row['Strand'] == "Forward" else "#EF553B"
-                        fig.add_trace(go.Bar(name=row['Name'], x=[row['Length']], y=[row['Strand']], base=[row['Start']], orientation='h', marker_color=clr))
-                    fig.update_layout(template="plotly_dark", barmode='stack', title="Linear ORF Map", xaxis_title="Position (bp)")
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.warning("No genes found.")
                 else:
-                    df['S_Ang'], df['E_Ang'] = (df['Start']/total_len)*360, (df['End']/total_len)*360
-                    fig = go.Figure()
-                    for _, row in df.iterrows():
-                        track, clr = (2.1, "#00CC96") if row['Strand']=="Forward" else (1.6, "#EF553B")
-                        fig.add_trace(go.Barpolar(name=row['Name'], r=[0.4], theta=[(row['S_Ang']+row['E_Ang'])/2], width=[max(1, row['E_Ang']-row['S_Ang'])], base=track, marker_color=clr))
-                    fig.update_layout(template="plotly_dark", polar=dict(hole=0.4, radialaxis=dict(visible=False)), height=700, title="Circular Genome Map")
-                    st.plotly_chart(fig, use_container_width=True)
+                    if viz_mode == "Linear Track":
+                        fig = go.Figure()
+                        for _, row in df.iterrows():
+                            clr = "#00CC96" if row['Strand'] == "Forward" else "#EF553B"
+                            fig.add_trace(go.Bar(name=row['Name'], x=[row['Length']], y=[row['Strand']], base=[row['Start']], orientation='h', marker_color=clr))
+                        fig.update_layout(template="plotly_dark", barmode='stack', title="Linear ORF Map")
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        df['S_Ang'], df['E_Ang'] = (df['Start']/total_len)*360, (df['End']/total_len)*360
+                        fig = go.Figure()
+                        for _, row in df.iterrows():
+                            track, clr = (2.1, "#00CC96") if row['Strand']=="Forward" else (1.6, "#EF553B")
+                            fig.add_trace(go.Barpolar(name=row['Name'], r=[0.4], theta=[(row['S_Ang']+row['E_Ang'])/2], width=[max(1, row['E_Ang']-row['S_Ang'])], base=track, marker_color=clr))
+                        fig.update_layout(template="plotly_dark", polar=dict(hole=0.4, radialaxis=dict(visible=False)), height=700, title="Circular Genome Map")
+                        st.plotly_chart(fig, use_container_width=True)
                 
-                if not df.empty:
-                    st.subheader("📂 Feature Annotation Data")
+                    st.markdown("---")
+                    st.subheader("📂 Export Center")
+                    ex1, ex2, ex3, ex4 = st.columns(4)
+                    
+                    # CSV Export
+                    csv = df.drop(columns=['Sequence']).to_csv(index=False)
+                    ex1.download_button("📄 CSV Report", csv, "genomic_results.csv", "text/csv", use_container_width=True)
+                    
+                    # FASTA Export
+                    fasta_out = "".join([f">{r['Name']} [Strand={r['Strand']}] [GC={r['GC %']}%]\n{r['Sequence']}\n" for i, r in df.iterrows()])
+                    ex2.download_button("🧬 FASTA Sequences", fasta_out, "sequences.fasta", "text/plain", use_container_width=True)
+                    
+                    # GFF3 Export
+                    gff_out = "##gff-version 3\n" + "".join([f"contig_1\tDeNovoApp\tCDS\t{r['Start']}\t{r['End']}\t.\t{'+' if r['Strand']=='Forward' else '-'}\t0\tID={r['Name']}\n" for i, r in df.iterrows()])
+                    ex3.download_button("📝 GFF3 Annotation", gff_out, "annotation.gff3", "text/plain", use_container_width=True)
+                    
+                    # JSON Export
+                    json_out = df.to_json(orient="records")
+                    ex4.download_button("💻 JSON Data", json_out, "data.json", "application/json", use_container_width=True)
+
                     st.dataframe(df.drop(columns=['Sequence']), use_container_width=True)
 
     except Exception as e:
